@@ -297,6 +297,14 @@
             </div>
             
             <div class="control-row" style="margin-top: 10px; border-bottom:1px solid #444; padding-bottom:10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">🔐 Biometric Registration</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <div id="bio-status" style="color:#888; font-size:0.8rem;">Checking...</div>
+                    <button id="btn-bio-reg" class="action-btn btn-blue" onclick="registerBiometric()" style="padding:10px; font-size:0.9rem; width:auto;">Register</button>
+                    <button id="btn-bio-clear" class="action-btn btn-red" onclick="clearBiometric()" style="padding:10px; font-size:0.9rem; width:auto; display:none;">Clear</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top: 10px; border-bottom:1px solid #444; padding-bottom:10px;">
                 <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">Mapping Presets</div>
                 <div style="display:flex; gap:10px;">
                     <button class="action-btn btn-gray" onclick="applyPreset('normal')" style="padding:10px; font-size:0.8rem;">Normal (1=0..8=7)</button>
@@ -454,6 +462,10 @@
         let btnEndian = JSON.parse(localStorage.getItem("btnEndian")) || Array(8).fill('big');
         let btnOnDelays = JSON.parse(localStorage.getItem("btnOnDelays")) || Array(8).fill(0);
         let btnOffDelays = JSON.parse(localStorage.getItem("btnOffDelays")) || Array(8).fill(0);
+        // Ver 4.0: Biometric Auth per button
+        let btnAuth = JSON.parse(localStorage.getItem("btnAuth")) || Array(8).fill(false);
+        // Ver 4.1: Auth Credential ID (Local Registration)
+        let authCredentialId = localStorage.getItem("authCredentialId");
         let btnColors = JSON.parse(localStorage.getItem("btnColors")) || Array(8).fill('#00FF00');
         
         let cfgVibe = JSON.parse(localStorage.getItem("cfgVibe")) !== false;
@@ -612,6 +624,19 @@
 
         /* --- Config UI Generation --- */
         function renderConfigList() {
+            // Update Bio Status UI
+            const st = document.getElementById("bio-status");
+            const btnReg = document.getElementById("btn-bio-reg");
+            const btnClear = document.getElementById("btn-bio-clear");
+            if (st && btnReg && btnClear) {
+                if (authCredentialId) {
+                    st.textContent = "✅ Registered"; st.style.color = "#28a745";
+                    btnReg.style.display = "none"; btnClear.style.display = "block";
+                } else {
+                    st.textContent = "⚠️ Not Registered"; st.style.color = "#ffc107";
+                    btnReg.style.display = "block"; btnClear.style.display = "none";
+                }
+            }
             const container = document.getElementById('config-list-container');
             container.innerHTML = '';
             btnLabels.forEach((label, i) => {
@@ -621,6 +646,7 @@
                 const color = btnColors[i];
                 const endian = btnEndian[i];
                 const icon = btnIcons[i];
+                const isAuth = btnAuth[i]; // Ver 4.0
                 row.innerHTML = `
                 <div style="display:flex; flex-direction:column; gap:2px; align-items:center;">
                   <button class="mini-opt" style="width:30px; height:30px; border:1px solid #555; padding:2px;" onclick="openIconPicker(${i})">
@@ -661,6 +687,12 @@
                      <button class="mini-opt ${endian === 'little' ? 'selected' : ''}" onclick="updateBtnEndian(${i}, 'little')">L</button>
                    </div>
                  </div>
+                 <div style="display:flex; flex-direction:column; align-items:center; margin-left:5px;">
+                   <span style="font-size:0.6rem; color:#888;">${isAuth ? 'Lock' : 'Unlock'}</span>
+                   <button class="mini-opt ${isAuth ? 'selected' : ''}" style="width:30px; height:30px; border:1px solid #555; padding:2px;" onclick="toggleBtnAuth(${i})">
+                      ${isAuth ? '🔒' : '🔓'}
+                   </button>
+                 </div>
             `;
                 container.appendChild(row);
             });
@@ -698,6 +730,73 @@
         function updateBtnColor(index, newColor) { btnColors[index] = newColor; localStorage.setItem("btnColors", JSON.stringify(btnColors)); const btn = document.getElementById(`btn-${index + 1}`); if (btn) { btn.style.setProperty('--btn-color', newColor); } }
         function updateBtnEndian(index, mode) { btnEndian[index] = mode; localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); renderConfigList(); }
         function applyPreset(type) { if (type === 'normal') { btnEndian = Array(8).fill('big'); } else { btnEndian = Array(8).fill('little'); } localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); renderConfigList(); }
+        
+        /* --- Auth Logic (Ver 4.0) --- */
+        async function toggleBtnAuth(index) {
+            // Ver 4.2: Require Auth to Unlock
+            if (btnAuth[index]) {
+                const authResult = await checkBiometricAuth();
+                if (!authResult) { alert("🔒 Authentication Failed. Cannot Unlock."); return; }
+            }
+            btnAuth[index] = !btnAuth[index];
+            localStorage.setItem("btnAuth", JSON.stringify(btnAuth));
+            renderConfigList();
+        }
+        // Converts an ArrayBuffer to a Base64 URL-safe string
+        function bufferToBase64(buffer) {
+            const bytes = new Uint8Array(buffer); let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) { binary += String.fromCharCode(bytes[i]); }
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        // Converts a Base64 URL-safe string to an ArrayBuffer
+        function base64ToBuffer(base64) {
+            const binary = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+            return bytes.buffer;
+        }
+        async function registerBiometric() {
+            if (!window.PublicKeyCredential) { alert("WebAuthn not supported."); return; }
+            try {
+                const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
+                const publicKey = {
+                    challenge: challenge,
+                    rp: { name: "M5Atom CAN Keypad", id: window.location.hostname },
+                    user: { id: new Uint8Array(16), name: "user@local", displayName: "Local User" },
+                    pubKeyCredParams: [{ alg: -7, type: "public-key" }, { alg: -257, type: "public-key" }],
+                    authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+                    timeout: 60000, attestation: "none"
+                };
+                const credential = await navigator.credentials.create({ publicKey });
+                const credId = bufferToBase64(credential.rawId);
+                localStorage.setItem("authCredentialId", credId);
+                authCredentialId = credId;
+                alert("Biometric Registered Successfully! 🔓 -> 🔒");
+                renderConfigList();
+            } catch (err) { console.error("Registration failed", err); alert("Registration Failed: " + err.message); }
+        }
+        async function clearBiometric() {
+            const authResult = await checkBiometricAuth();
+            if (!authResult) { alert("🔒 Authentication Failed. Cannot Clear."); return; }
+            if (confirm("Clear registered biometric data?")) {
+                localStorage.removeItem("authCredentialId"); authCredentialId = null; renderConfigList();
+            }
+        }
+        async function checkBiometricAuth() {
+            if (!window.PublicKeyCredential) { alert("Biometric authentication not supported on this device/browser."); return false; }
+            if (!authCredentialId) { alert("Biometric not registered. Please register in Settings."); return false; }
+            try {
+                const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
+                const opts = {
+                    challenge: challenge, timeout: 60000, userVerification: "required",
+                    rpId: window.location.hostname,
+                    allowCredentials: [{ id: base64ToBuffer(authCredentialId), type: 'public-key', transports: ['internal'] }]
+                };
+                const credential = await navigator.credentials.get({ publicKey: opts });
+                if (credential) { return true; }
+            } catch (err) { console.error("Auth failed", err); }
+            return false;
+        }
         
         function setVibe(state) { cfgVibe = state; localStorage.setItem("cfgVibe", JSON.stringify(cfgVibe)); }
         function setSound(state) { cfgSound = state; localStorage.setItem("cfgSound", JSON.stringify(cfgSound)); if (state) initAudio(); }
@@ -857,6 +956,15 @@
         function reverseBits(b) { b = b & 0xFF; let r = 0; for (let i = 0; i < 8; i++) { if ((b >> i) & 1) { r |= 1 << (7 - i); } } return r; }
         async function handlePointerDown(n, e) {
             if (e) { e.preventDefault(); } triggerFeedback(); const btnEl = document.getElementById(`btn-${n}`); if (btnEl) btnEl.classList.add('pressing'); const idx = n - 1;
+            // Ver 4.0: Check Biometric Auth
+            if (btnAuth[idx]) {
+                const authResult = await checkBiometricAuth();
+                if (!authResult) {
+                    if (btnEl) btnEl.classList.remove('pressing');
+                    alert("🔒 Authentication Failed");
+                    return;
+                }
+            }
             const currentState = btnStates[idx]; const targetState = !currentState; const delay = targetState ? btnOnDelays[idx] : btnOffDelays[idx];
             if (delay > 0) { holdTimers[idx] = setTimeout(() => { executeAction(n); holdTimers[idx] = null; if (btnEl) btnEl.classList.remove('pressing'); }, delay * 1000); } else { executeAction(n); if (btnEl) btnEl.classList.remove('pressing'); }
         }
@@ -880,7 +988,7 @@
         }
 
         function exportConfig() {
-            const config = { version: "8.1.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs };
+            const config = { version: "8.1.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnAuth, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs };
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2)); const downloadAnchor = document.createElement('a'); downloadAnchor.setAttribute("href", dataStr); downloadAnchor.setAttribute("download", "m5_can_config_v3_8.json"); document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove(); log("Config Exported");
         }
         function importConfig() { document.getElementById('import-file').click(); }
@@ -896,6 +1004,7 @@
                     if (config.btnOffVals) { btnOffVals = config.btnOffVals; localStorage.setItem("btnOffVals", JSON.stringify(btnOffVals)); }
                     if (config.btnEndian) { btnEndian = config.btnEndian; localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); }
                     if (config.btnIcons) { btnIcons = config.btnIcons; localStorage.setItem("btnIcons", JSON.stringify(btnIcons)); }
+                    if (config.btnAuth) { btnAuth = config.btnAuth; localStorage.setItem("btnAuth", JSON.stringify(btnAuth)); }
                     if (config.cfgVibe !== undefined) { cfgVibe = config.cfgVibe; localStorage.setItem("cfgVibe", JSON.stringify(cfgVibe)); }
                     if (config.cfgSound !== undefined) { cfgSound = config.cfgSound; localStorage.setItem("cfgSound", JSON.stringify(cfgSound)); }
                     if (config.canId) { document.getElementById("can-id-input").value = config.canId; canIdVal = config.canId; localStorage.setItem("canIdVal", canIdVal); }
@@ -985,10 +1094,9 @@
             const currentState = btnStates[index]; 
             const label = btnLabels[index]; 
             
-            // Check Lock
-            // Note: In V3.81, auth is not fully implemented in UI but array exists
-            // let isLock = false; if(typeof btnAuth !== 'undefined') isLock = btnAuth[index];
-            // if (isLock) { speakVoice(label + "はロックされています。"); return; } 
+            // Check Lock (Ver 4.0)
+            const isLock = btnAuth[index];
+            if (isLock) { speakVoice(label + "はロックされています。手動で操作してください。"); return; }
             
             if (btnModes[index] === 'momentary') { 
                 executeAction(btnNum); 
