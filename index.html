@@ -1,1 +1,1051 @@
 
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>M5Atom CAN Keypad (v3.81 Voice Fix)</title>
+    <style>
+        /* Reset & Base */
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh;
+            overflow: hidden; background-color: #1a1a1a; color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            touch-action: manipulation; display: flex; flex-direction: column;
+        }
+        /* --- Views --- */
+        .view-container {
+            display: none; flex: 1; flex-direction: column; box-sizing: border-box;
+            padding: 10px; width: 100%; height: 100%; overflow: hidden;
+        }
+        .view-container.active { display: flex; }
+        /* --- Main View (Keypad) --- */
+        #view-main { position: relative; }
+        .main-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 5px; padding: 0 5px; flex-shrink: 0; height: 40px;
+        }
+        .status-group { display: flex; align-items: center; gap: 10px; }
+        .status-indicator { font-size: 0.9rem; color: #888; font-weight: bold; }
+        .status-indicator.can-ok { color: #28a745; }
+        .status-indicator.can-err { color: #dc3545; }
+        .status-indicator.stalled { color: #ffc107; }
+        .status-indicator.connected { color: #28a745; }
+        .header-btn {
+            background: none; border: none; font-size: 1.5rem; cursor: pointer;
+            padding: 5px; color: #aaa; line-height: 1;
+        }
+        /* Connect Overlay */
+        #connect-overlay {
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            width: 100%; height: 100%; position: absolute; top: 40px; left: 0; bottom: 0;
+            background: #1a1a1a; z-index: 10;
+        }
+        #start-btn {
+            width: 200px; height: 200px; border-radius: 50%; border: 4px solid #007bff;
+            background: rgba(0, 123, 255, 0.1); color: #007bff; font-size: 1.5rem; font-weight: bold;
+            cursor: pointer; box-shadow: 0 0 20px rgba(0, 123, 255, 0.3); transition: all 0.2s ease;
+            display: flex; justify-content: center; align-items: center; text-align: center;
+        }
+        #start-btn:active { transform: scale(0.95); background: rgba(0, 123, 255, 0.3); }
+        #keypad {
+            display: none; gap: 8px; flex-grow: 1; width: 100%; max-width: 600px; align-self: center;
+            grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr);
+        }
+        #keypad.visible { display: grid; }
+        @media (orientation: landscape) {
+            #keypad { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); }
+            .main-header { margin-bottom: 2px; height: 30px; }
+            #connect-overlay { top: 30px; }
+        }
+        .key-btn {
+            background: #333; border: 3px solid var(--btn-color, #777); border-radius: 12px;
+            color: var(--btn-color, #fff); font-weight: bold; cursor: pointer;
+            display: flex; justify-content: center; align-items: center; flex-direction: column;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); position: relative; text-align: center;
+            width: 100%; height: 100%; user-select: none; -webkit-user-select: none;
+            -webkit-touch-callout: none; touch-action: none; font-size: clamp(1rem, 5vw, 2rem);
+            transition: all 0.1s ease;
+        }
+        .key-btn:active, .key-btn.pressed { transform: scale(0.98); }
+        .key-btn.active {
+            background: var(--btn-color, #006000); color: #fff;
+            box-shadow: 0 0 15px var(--btn-color, rgba(0, 255, 0, 0.4));
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        }
+        .key-btn.pressing { transform: scale(0.95); opacity: 0.8; }
+        /* --- Settings View --- */
+        #view-settings { background: #222; overflow-y: auto; align-items: center; }
+        .settings-header {
+            display: flex; width: 100%; align-items: center; margin-bottom: 20px;
+            padding-bottom: 10px; border-bottom: 1px solid #444; flex-shrink: 0;
+        }
+        .back-btn { background: none; border: none; font-size: 1.2rem; color: #fff; cursor: pointer; padding: 10px; }
+        .settings-title { flex-grow: 1; text-align: center; font-size: 1.2rem; font-weight: bold; }
+        .settings-group {
+            width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 20px;
+            box-sizing: border-box; padding: 0 5px;
+        }
+        .control-row { width: 100%; }
+        .action-btn {
+            width: 100%; padding: 15px; font-size: 1rem; border-radius: 8px; border: none;
+            color: white; cursor: pointer; font-weight: bold; display: flex;
+            justify-content: center; align-items: center; gap: 8px;
+        }
+        .btn-blue { background: #007bff; }
+        .btn-gray { background: #555; }
+        .btn-orange { background: #e67e22; }
+        .btn-green { background: #28a745; }
+        .btn-red { background: #dc3545; }
+        .id-input-group {
+            display: flex; align-items: center; background: #333; padding: 5px;
+            border-radius: 8px; gap: 5px; width: 100%; box-sizing: border-box; flex-wrap: nowrap;
+        }
+        .id-input-group label {
+            padding-left: 5px; color: #ddd; font-size: 0.85rem; white-space: nowrap; min-width: 35px;
+        }
+        #can-id-input, #k-meter-id-input, #temp-alarm-input {
+            flex: 1; background: #222; border: 1px solid #555; color: white; padding: 12px;
+            border-radius: 4px; text-align: center; font-family: monospace; font-size: 1.2rem; min-width: 80px;
+        }
+        input, select {
+             background: #222; border: 1px solid #555; color: white; padding: 8px;
+             border-radius: 4px; text-align: center; font-family: monospace; font-size: 1rem;
+        }
+        #set-id-btn { padding: 12px 20px; white-space: nowrap; min-width: 80px; }
+        /* Config List */
+        .config-list {
+            display: flex; flex-direction: column; gap: 10px; background: #2a2a2a;
+            padding: 10px; border-radius: 8px;
+        }
+        .config-list .config-row {
+            display: flex; justify-content: space-between; align-items: center;
+            background: #333; padding: 8px 10px; border-radius: 6px; gap: 5px; flex-wrap: wrap;
+        }
+        .config-name-input {
+            flex: 1; background: #222; border: 1px solid #555; color: white;
+            padding: 8px; border-radius: 4px; font-size: 16px; min-width: 60px;
+        }
+        /* Mini Segmented Control */
+        .mini-switch {
+            display: flex; background: #222; border-radius: 4px; padding: 2px; gap: 4px; flex-shrink: 0;
+        }
+        .mini-opt {
+            border: none; background: none; color: #666; font-size: 0.85rem;
+            padding: 6px 10px; border-radius: 3px; cursor: pointer;
+        }
+        .mini-opt.selected { background: #555; color: #fff; font-weight: bold; }
+        #log {
+            margin-top: 20px; width: 100%; height: 100px; min-height: 100px; overflow-y: auto;
+            background: #000; color: #0f0; font-family: monospace; font-size: 0.7rem;
+            padding: 5px; border: 1px solid #444; box-sizing: border-box;
+        }
+        #sync-overlay {
+            display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6); z-index: 5; justify-content: center;
+            align-items: center; color: #00ff00; font-weight: bold; font-size: 1.2rem;
+        }
+        /* Live Preview Box Style */
+        .live-preview-box {
+            background: #111; border: 1px solid #444; border-radius: 6px; padding: 10px;
+            margin-top: 10px; margin-bottom: 10px; text-align: center;
+        }
+        .live-val { color: #00ff00; font-family: monospace; font-size: 1.5rem; font-weight: bold; }
+        .live-raw { color: #666; font-size: 0.8rem; margin-top: 2px; }
+        
+        /* Voice Animations */
+        @keyframes pulse-mic { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes blink-red { 0% { color: #ff0000; text-shadow: 0 0 10px #ff0000; } 50% { color: #880000; text-shadow: none; } 100% { color: #ff0000; text-shadow: 0 0 10px #ff0000; } }
+        .temp-warning { animation: blink-red 1s infinite; font-weight: bold; font-size: 1.4rem !important; }
+        /* --- Meter View --- */
+        #view-meter { background: #000; flex-direction: column; padding-top: 50px; box-sizing: border-box; }
+        #meter-grid {
+            display: grid; gap: 8px; width: 100%; height: 100%; padding: 10px; box-sizing: border-box;
+            grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr);
+        }
+        @media (orientation: landscape) { #meter-grid { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); } }
+        .meter-cell {
+            background: #111; border: 2px solid #333; border-radius: 12px; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            position: relative; box-shadow: 0 0 10px rgba(0, 0, 0, 0.5); overflow: hidden;
+        }
+        .meter-label {
+            position: absolute; top: 5px; left: 0; width: 100%; text-align: center;
+            color: #888; font-size: 0.8rem; text-transform: uppercase; font-weight: bold;
+        }
+        .meter-value {
+            font-family: 'Courier New', Courier, monospace; font-weight: bold;
+            font-size: clamp(1.5rem, 6vw, 2.5rem); color: #fff;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.2);
+        }
+        .meter-unit { position: absolute; bottom: 5px; right: 10px; color: #666; font-size: 0.7rem; }
+        /* Specific Colors */
+        .val-green { color: #00FF00; text-shadow: 0 0 10px rgba(0, 255, 0, 0.4); }
+        .val-red { color: #FF0000; text-shadow: 0 0 10px rgba(255, 0, 0, 0.6); }
+        .val-yellow { color: #FFD700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.4); }
+        .val-cyan { color: #00FFFF; text-shadow: 0 0 10px rgba(0, 255, 255, 0.4); }
+        .val-gray { color: #444; }
+        .meter-header-btn {
+            position: absolute; top: 10px; left: 10px; font-size: 1.5rem; background: #333;
+            border: 1px solid #555; border-radius: 8px; padding: 5px 15px; color: white;
+            cursor: pointer; z-index: 20;
+        }
+    </style>
+</head>
+<body>
+    <div id="view-meter" class="view-container">
+        <button class="meter-header-btn" onclick="showMain()">↩️ Back</button>
+        <div id="meter-grid">
+            <div class="meter-cell">
+                <div class="meter-label">Exhaust Temp</div>
+                <div id="meter-val-1" class="meter-value val-cyan">--</div>
+                <div class="meter-unit">°C</div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-2" class="meter-label">RX Monitor</div>
+                <div id="meter-val-2" class="meter-value val-yellow">---</div>
+                <div id="meter-unit-2" class="meter-unit">RAW</div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-3" class="meter-label">RX Mon 2</div>
+                <div id="meter-val-3" class="meter-value val-gray">---</div>
+                <div id="meter-unit-3" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-4" class="meter-label">RX Mon 3</div>
+                <div id="meter-val-4" class="meter-value val-gray">---</div>
+                <div id="meter-unit-4" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-5" class="meter-label">RX Mon 4</div>
+                <div id="meter-val-5" class="meter-value val-gray">---</div>
+                <div id="meter-unit-5" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-6" class="meter-label">RX Mon 5</div>
+                <div id="meter-val-6" class="meter-value val-gray">---</div>
+                <div id="meter-unit-6" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-7" class="meter-label">RX Mon 6</div>
+                <div id="meter-val-7" class="meter-value val-gray">---</div>
+                <div id="meter-unit-7" class="meter-unit"></div>
+            </div>
+            <div class="meter-cell">
+                <div id="meter-label-8" class="meter-label">RX Mon 7</div>
+                <div id="meter-val-8" class="meter-value val-gray">---</div>
+                <div id="meter-unit-8" class="meter-unit"></div>
+            </div>
+        </div>
+    </div>
+    <div id="view-main" class="view-container active">
+        <div class="main-header">
+            <div class="status-group">
+                <div id="status-display" class="status-indicator">🔴 Disconnected</div>
+                <div id="can-status-display" class="status-indicator" style="display:none; font-size:0.8rem; border-left:1px solid #444; padding-left:10px;">CAN: --</div>
+            </div>
+            <div style="flex:1;"></div>
+            <div style="display:flex; gap:15px; align-items:center;">
+                <button id="meter-view-btn" class="header-btn" onclick="showMeter()">📟</button>
+                <button id="main-sound-btn" class="header-btn" onclick="toggleSoundMain()" style="font-size:1.2rem;">🔊</button>
+                <button class="header-btn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+                <button id="settings-btn" class="header-btn" onclick="showSettings()">⚙️</button>
+            </div>
+        </div>
+        <div id="connect-overlay">
+            <button id="start-btn" onclick="handleStartConnect()">CONNECT<br>START</button>
+            <div style="margin-top:20px; color:#666; font-size:0.8rem;">Ver 3.81 (Voice Fix)</div>
+        </div>
+        <div id="sync-overlay">⚙️ Syncing...</div>
+        <div id="keypad"></div>
+    </div>
+    <div id="view-settings" class="view-container">
+        <div class="settings-header">
+            <button class="back-btn" onclick="showMain()">‹ Back</button>
+            <div class="settings-title">Settings</div>
+            <div style="width: 50px;"></div>
+        </div>
+        <div class="settings-group">
+            <div class="control-row" id="disconnect-row" style="display:none;">
+                <button id="disconnect-btn" class="action-btn btn-red" onclick="disconnect()">🔴 Disconnect</button>
+            </div>
+            <div class="control-row">
+                <div class="id-input-group">
+                    <label style="min-width: 60px;">PAD:0x</label>
+                    <input type="text" id="can-id-input" value="100" maxlength="3">
+                    <button id="set-id-btn" class="action-btn btn-orange" onclick="setCanId()">SET</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top:5px;">
+                <div class="id-input-group">
+                    <label style="min-width: 60px;">KID:0x</label>
+                    <input type="text" id="k-meter-id-input" value="200" maxlength="3">
+                    <button id="set-k-id-btn" class="action-btn btn-orange" onclick="setKMeterId()">SET</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top:5px;">
+                <div style="display:flex; gap:5px;">
+                    <div class="id-input-group" style="flex:0.4; padding:2px;">
+                        <input type="color" id="temp-color-input" value="#00FFFF" style="width:100%; height:35px; border:none; padding:0; background:none; cursor:pointer;">
+                    </div>
+                    <div class="id-input-group" style="flex:1; border: 1px solid #d35400;">
+                        <label style="min-width: 50px; color: #e67e22;">Alm:°C</label>
+                        <input type="number" id="temp-alarm-input" value="950" placeholder="e.g. 900">
+                    </div>
+                </div>
+                <div style="font-size:0.7rem; color:#888; margin-top:2px; text-align:right;">Exhaust Temp Color & Alarm</div>
+            </div>
+            
+            <div class="control-row" style="margin-top: 10px; border-bottom:1px solid #444; padding-bottom:10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">Mapping Presets</div>
+                <div style="display:flex; gap:10px;">
+                    <button class="action-btn btn-gray" onclick="applyPreset('normal')" style="padding:10px; font-size:0.8rem;">Normal (1=0..8=7)</button>
+                    <button class="action-btn btn-gray" onclick="applyPreset('reverse')" style="padding:10px; font-size:0.8rem;">Reverse (1=7..8=0)</button>
+                </div>
+            </div>
+            <div class="control-row" style="margin-top: 10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px; margin-left: 5px;">Button Configuration</div>
+                <div id="config-list-container" class="config-list"></div>
+            </div>
+            
+            <div class="control-row" style="margin-top: 10px; border-top: 1px solid #444; padding-top: 5px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">📡 RX Monitor Config</div>
+                
+                <div style="display:flex; gap:5px; margin-bottom:10px;">
+                     <select id="rx-slot-select" onchange="loadRxSlotFromUI()" style="width:100%; background:#005cbf; font-weight:bold; font-size:1.1rem; padding:10px;">
+                         <option value="0">Monitor 1 (VAL)</option>
+                         <option value="1">Monitor 2 (VAL2)</option>
+                         <option value="2">Monitor 3 (VAL3)</option>
+                         <option value="3">Monitor 4 (VAL4)</option>
+                         <option value="4">Monitor 5 (VAL5)</option>
+                         <option value="5">Monitor 6 (VAL6)</option>
+                         <option value="6">Monitor 7 (VAL7)</option>
+                     </select>
+                </div>
+
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:0.3; padding:2px;">
+                        <input type="color" id="rx-color-input" value="#FFD700" style="width:100%; height:30px; border:none; padding:0; background:none; cursor:pointer;">
+                    </div>
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:30px; font-size:0.75rem; color:#74c0fc; padding-left:2px;">Name</label>
+                        <input type="text" id="rx-label-input" value="RX Monitor" maxlength="12" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-size:0.8rem;">
+                    </div>
+                </div>
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:18px; font-size:0.75rem; color:#e67e22; padding-left:2px;">ID</label>
+                        <input type="text" id="rx-monitor-id-input" value="90" maxlength="3" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
+                    </div>
+                    <div class="id-input-group" style="flex:0.7; padding: 1px; gap: 1px;">
+                        <label style="min-width:18px; font-size:0.75rem; padding-left:2px;">Idx</label>
+                        <input type="number" id="rx-byte-index-input" value="2" min="0" max="7" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
+                    </div>
+                    <div class="id-input-group" style="flex:1.5; padding: 1px; gap: 1px;">
+                        <select id="rx-mode-select" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; font-size:0.75rem;">
+                            <option value="0">1B</option>
+                            <option value="1" selected>2B-LE</option>
+                            <option value="2">2B-BE</option>
+                            <option value="3">1B Sig</option>
+                            <option value="4">2B-L Sig</option>
+                            <option value="5">2B-B Sig</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:0.8; padding: 1px; gap: 1px;">
+                        <label style="min-width:15px; font-size:0.75rem; padding-left:2px;">Mul</label>
+                        <input type="text" id="rx-mul-input" value="1.0" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
+                    </div>
+                    <div class="id-input-group" style="flex:0.8; padding: 1px; gap: 1px;">
+                        <label style="min-width:15px; font-size:0.75rem; padding-left:2px;">Add</label>
+                         <input type="text" id="rx-add-input" value="0" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
+                    </div>
+                    <div style="flex:1.4;"></div>
+                </div>
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:18px; font-size:0.75rem; padding-left:2px;">Dec</label>
+                        <select id="rx-dec-select" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; font-size:0.8rem;">
+                            <option value="0">0</option>
+                            <option value="1">0.0</option>
+                            <option value="2">0.00</option>
+                        </select>
+                    </div>
+                    <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
+                        <label style="min-width:22px; font-size:0.75rem; padding-left:2px;">Unit</label>
+                        <input type="text" id="rx-unit-input" placeholder="-" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-size:0.8rem;">
+                    </div>
+                </div>
+                <div style="display:flex; gap:2px; margin-bottom:4px;">
+                    <div class="id-input-group" style="width: 100%; padding: 1px; gap: 1px; border:1px solid #d35400;">
+                        <label style="min-width:35px; font-size:0.75rem; padding-left:5px; color:#e67e22;">Alarm</label>
+                        <select id="rx-alarm-mode-select" style="flex:0.6; background:#222; border:1px solid #555; color:#ccc; padding:4px 0; border-radius:4px; font-size:0.75rem; margin-right:2px;">
+                            <option value="high">Over (≧)</option>
+                            <option value="low">Under (≦)</option>
+                        </select>
+                        <input type="number" id="rx-alarm-input" placeholder="Off" style="flex:1; background:#222; border:1px solid #555; color:white; padding:8px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.9rem;">
+                    </div>
+                </div>
+                
+                <div class="live-preview-box" style="padding: 5px; margin-top: 5px; margin-bottom: 5px;">
+                    <div style="font-size:0.7rem; color:#aaa;">Preview</div>
+                    <div id="rx-live-val" class="live-val" style="font-size: 1.2rem;">---</div>
+                </div>
+                <button class="action-btn btn-orange" onclick="setRxConfig()" style="padding: 10px; font-size: 0.9rem;">SET & SAVE (Current Slot)</button>
+                <div id="rx-config-status" style="font-size:0.75rem; color:#888; margin-top:4px; text-align:right;"></div>
+            </div>
+            
+            <div class="control-row" style="margin-top: 10px;">
+                <button class="action-btn btn-gray" onclick="toggleFullscreen()">⛶ Toggle Fullscreen</button>
+            </div>
+            <div class="control-row" style="margin-top: 20px; border-top: 1px solid #444; padding-top: 10px;">
+                <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px; text-align: center;">Config Backup</div>
+                <div style="display:flex; gap:10px;">
+                    <button class="action-btn btn-blue" onclick="exportConfig()" style="font-size:0.9rem;">⬇ Save Config</button>
+                    <button class="action-btn btn-orange" onclick="importConfig()" style="font-size:0.9rem;">⬆ Load Config</button>
+                </div>
+                <input type="file" id="import-file" style="display:none" accept=".json" onchange="handleFileSelect(this)">
+            </div>
+            <div style="color: #666; font-size: 0.8rem; text-align: center; margin-top: 10px;">Atom S3 Keypad & Dash Meter Ver 3.81 (Final)<br>M5Atom S3 CAN</div>
+        </div>
+        <pre id="log">Logs...</pre>
+    </div>
+    <div id="icon-picker-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:20; justify-content:center; align-items:center;">
+        <div style="background:#222; padding:20px; border-radius:10px; border:1px solid #555; width:80%; max-width:300px;">
+            <div style="text-align:center; margin-bottom:15px; font-weight:bold;">Select Icon</div>
+            <div id="icon-picker-grid" style="display:grid; grid-template-columns:repeat(5, 1fr); gap:10px;"></div>
+            <div style="margin-top:15px; text-align:center;">
+                <button class="action-btn btn-gray" onclick="closeIconPicker()">Cancel</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+        const TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+        const ICONS = {
+            none: null,
+            power: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>',
+            light: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-8.5h-2v3h2V2zm4.25 4.42l1.79 1.79 1.41-1.41-1.79-1.79-1.41 1.41zm5.75 4.08h-3v2h3v-2zm-12 11V6.5h14V17c0 2.21-1.79 4-4 4h-6c-2.21 0-4-1.79-4-4z"/></svg>',
+            wiper: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="M5 12l2-6 8 0 2 6"/><path d="M14 6l-2-3"/></svg>',
+            horn: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10v4h2l5 5v-14l-5 5H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>',
+            lock: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>',
+            music: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>',
+            fan: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 11c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 2c0-3.31-2.69-6-6-6s-6 2.69-6 6c0 2.22 1.21 4.15 3 5.19V14.2c-1.21-.63-2-2.16-2-3.2 0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.79 2.57-2 3.2v3.99c1.79-1.04 3-2.97 3-5.19z"/></svg>',
+            hazard: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
+            setting: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84a.484.484 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0 .59-.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.27.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
+            engine: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>',
+            rain: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4.5 9c0-.8.7-1.5 1.5-1.5S7.5 8.2 7.5 9s-.7 1.5-1.5 1.5S4.5 9.8 4.5 9zm12 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5zm-6 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5zm-6 6c0-.8.7-1.5 1.5-1.5S7.5 14.2 7.5 15s-.7 1.5-1.5 1.5S4.5 15.8 4.5 15zm12 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5zm-6 0c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5-.7 1.5-1.5 1.5-1.5-.8-1.5-1.5z"/></svg>',
+            menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
+            ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>',
+            fuel: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 14h-2V5c0-1.1-.9-2-2-2h-6c-1.1 0-2 .9-2 2v14h10v-5zM9 5h6v9H9V5zm-2 9H5V5h2v9zm13 8h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>',
+            temp: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 13V5c0-1.66-1.34-3-3-3S9 3.34 9 5v8c-1.21.91-2 2.37-2 4 0 2.76 2.24 5 5 5s5-2.24 5 5c0-1.63-.79-3.09-2-4zm-4-8c0-.55.45-1 1-1s1 .45 1 1h-2z"/></svg>',
+            winch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v7"/><path d="M12 15v7"/><path d="M15 12h7"/><path d="M2 12h7"/></svg>'
+        };
+        let device, rxChar, txChar, gattServer;
+        
+        // --- BUTTON DATA STORAGE ---
+        let btnLabels = JSON.parse(localStorage.getItem("btnLabels")) || Array.from({ length: 8 }, (_, i) => `BTN ${i + 1}`);
+        let btnOnVals = JSON.parse(localStorage.getItem("btnOnVals")) || Array(8).fill('01');
+        let btnOffVals = JSON.parse(localStorage.getItem("btnOffVals")) || Array(8).fill('00');
+        let btnIcons = JSON.parse(localStorage.getItem("btnIcons")) || Array(8).fill('none');
+        let btnModes = JSON.parse(localStorage.getItem("btnModes")) || Array(8).fill('toggle');
+        let btnEndian = JSON.parse(localStorage.getItem("btnEndian")) || Array(8).fill('big');
+        let btnOnDelays = JSON.parse(localStorage.getItem("btnOnDelays")) || Array(8).fill(0);
+        let btnOffDelays = JSON.parse(localStorage.getItem("btnOffDelays")) || Array(8).fill(0);
+        let btnColors = JSON.parse(localStorage.getItem("btnColors")) || Array(8).fill('#00FF00');
+        
+        let cfgVibe = JSON.parse(localStorage.getItem("cfgVibe")) !== false;
+        let cfgSound = JSON.parse(localStorage.getItem("cfgSound")) !== false;
+        let tempWarnVal = parseInt(localStorage.getItem("tempWarnVal")) || 950;
+        let lastTempWarnTime = 0;
+        let tempColor = localStorage.getItem("tempColor") || "#00FFFF";
+        
+        // --- MULTI-METER DATA STORAGE (NEW IN V3.8) ---
+        // Slots 0-6 represent Monitors 1-7 (Displayed as VAL, VAL2...VAL7)
+        // Default values provided for each slot
+        const DEFAULT_RX_CONFIG = {
+            id: "90", idx: "2", mode: "1", mul: 1.0, add: 0, dec: 0, 
+            unit: "", label: "Monitor", color: "#FFD700", alarmMode: "high", warnVal: null 
+        };
+        
+        let rxConfigs = JSON.parse(localStorage.getItem("rxConfigs"));
+        if (!rxConfigs || !Array.isArray(rxConfigs) || rxConfigs.length < 7) {
+            // Migrate old single values or init new
+            const oldId = localStorage.getItem("rxMonitorId") || "90";
+            const oldLbl = localStorage.getItem("rxLabel") || "RX Monitor";
+            rxConfigs = Array.from({length: 7}, (_, i) => ({
+                ...DEFAULT_RX_CONFIG, 
+                id: (i===0 ? oldId : "90"), 
+                label: (i===0 ? oldLbl : `Monitor ${i+1}`)
+            }));
+        }
+        
+        let lastRxWarnTimes = Array(7).fill(0);
+        let currentRxSlot = 0; // Currently editing slot in Settings (0-6)
+
+        let audioCtx = null;
+        let btnStates = Array(8).fill(false);
+        let isConnected = false;
+        let lastPulseTimes = Array(8).fill(0);
+        let holdTimers = Array(8).fill(null);
+        let watchdogTimer = null;
+        const WATCHDOG_TIMEOUT = 3500;
+        let canIdVal = localStorage.getItem("canIdVal") || "100";
+        let kMeterIdVal = localStorage.getItem("kMeterIdVal") || "200";
+
+        document.addEventListener("DOMContentLoaded", () => {
+            const cInput = document.getElementById("can-id-input"); if (cInput) cInput.value = canIdVal;
+            const kInput = document.getElementById("k-meter-id-input"); if (kInput) kInput.value = kMeterIdVal;
+            const tInput = document.getElementById("temp-alarm-input");
+            if (tInput) {
+                tInput.value = tempWarnVal;
+                tInput.addEventListener('change', (e) => {
+                    let val = parseInt(e.target.value); if (isNaN(val)) val = 950;
+                    tempWarnVal = val; localStorage.setItem("tempWarnVal", tempWarnVal);
+                });
+            }
+            const tColInput = document.getElementById("temp-color-input");
+            if (tColInput) {
+                tColInput.value = tempColor;
+                tColInput.addEventListener('change', (e) => {
+                    tempColor = e.target.value; localStorage.setItem("tempColor", tempColor);
+                });
+            }
+            // Load initial RX Config UI for Slot 0
+            loadRxSlotFromUI();
+            updateLabelsOnMeterView();
+            // Inject Mic Button (Fix V3.81)
+            injectMicButton();
+        });
+
+        /* --- RX Config Logic (V3.8) --- */
+        function loadRxSlotFromUI() {
+            const sel = document.getElementById("rx-slot-select");
+            currentRxSlot = parseInt(sel.value);
+            const cfg = rxConfigs[currentRxSlot];
+            
+            document.getElementById("rx-monitor-id-input").value = cfg.id;
+            document.getElementById("rx-byte-index-input").value = cfg.idx;
+            document.getElementById("rx-mode-select").value = cfg.mode;
+            document.getElementById("rx-mul-input").value = cfg.mul;
+            document.getElementById("rx-add-input").value = cfg.add;
+            document.getElementById("rx-dec-select").value = cfg.dec;
+            document.getElementById("rx-unit-input").value = cfg.unit;
+            document.getElementById("rx-label-input").value = cfg.label;
+            document.getElementById("rx-color-input").value = cfg.color;
+            document.getElementById("rx-alarm-mode-select").value = cfg.alarmMode;
+            document.getElementById("rx-alarm-input").value = (cfg.warnVal === null) ? "" : cfg.warnVal;
+            
+            document.getElementById("rx-config-status").textContent = "";
+        }
+        
+        function updateLabelsOnMeterView() {
+            // Update labels for Meter View based on stored configs
+            // Slot 0 -> meter-label-2, Slot 1 -> meter-label-3 ... Slot 6 -> meter-label-8
+            for(let i=0; i<7; i++) {
+                const el = document.getElementById(`meter-label-${i+2}`);
+                if(el) el.textContent = rxConfigs[i].label;
+            }
+        }
+
+        function setRxConfig() {
+            const cfg = rxConfigs[currentRxSlot];
+            
+            // UIから値を取得
+            const idVal = document.getElementById("rx-monitor-id-input").value.trim();
+            if (!idVal.match(/^[0-9A-Fa-f]+$/)) { alert("Invalid Hex ID"); return; }
+            
+            cfg.id = idVal;
+            cfg.idx = document.getElementById("rx-byte-index-input").value;
+            cfg.mode = document.getElementById("rx-mode-select").value;
+            cfg.mul = parseFloat(document.getElementById("rx-mul-input").value) || 1.0;
+            cfg.add = parseFloat(document.getElementById("rx-add-input").value) || 0;
+            cfg.dec = parseInt(document.getElementById("rx-dec-select").value) || 0;
+            cfg.unit = document.getElementById("rx-unit-input").value || "";
+            cfg.label = document.getElementById("rx-label-input").value || `Monitor ${currentRxSlot+1}`;
+            cfg.color = document.getElementById("rx-color-input").value;
+            cfg.alarmMode = document.getElementById("rx-alarm-mode-select").value;
+            const wVal = parseFloat(document.getElementById("rx-alarm-input").value);
+            cfg.warnVal = isNaN(wVal) ? null : wVal;
+
+            // 保存
+            localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs));
+            updateLabelsOnMeterView();
+            
+            const statusEl = document.getElementById("rx-config-status");
+            
+            // --- 全スロットでコマンド送信 (デバイス側V3.8対応) ---
+            let devMode = cfg.mode;
+            if (cfg.mode == 3) devMode = 0; 
+            if (cfg.mode == 4) devMode = 1; 
+            if (cfg.mode == 5) devMode = 2; 
+
+            const idDec = parseInt(cfg.id, 16); 
+            // コマンド形式: SET_RX=slotIndex,canID(dec),byteIndex,mode
+            const cmd = `SET_RX=${currentRxSlot},${idDec},${cfg.idx},${devMode}`; 
+            
+            log("TX Config: " + cmd); 
+
+            if (rxChar) {
+                rxChar.writeValue(new TextEncoder().encode(cmd))
+                    .then(() => { 
+                        if (statusEl) { 
+                            statusEl.textContent = `📡 Sent Slot ${currentRxSlot+1} Config!`; 
+                            statusEl.style.color = "#74c0fc"; 
+                        } 
+                    })
+                    .catch(e => { 
+                        if (statusEl) { 
+                            statusEl.textContent = "❌ Send failed"; 
+                            statusEl.style.color = "#ff6b6b"; 
+                        } 
+                    });
+            } else {
+                if (statusEl) { 
+                    statusEl.textContent = `✅ Saved locally (Not Connected)`; 
+                    statusEl.style.color = "#ffc107"; 
+                }
+            }
+        }
+
+        /* --- Config UI Generation --- */
+        function renderConfigList() {
+            const container = document.getElementById('config-list-container');
+            container.innerHTML = '';
+            btnLabels.forEach((label, i) => {
+                const row = document.createElement('div');
+                row.className = 'config-row';
+                const isMom = (btnModes[i] === 'momentary');
+                const color = btnColors[i];
+                const endian = btnEndian[i];
+                const icon = btnIcons[i];
+                row.innerHTML = `
+                <div style="display:flex; flex-direction:column; gap:2px; align-items:center;">
+                  <button class="mini-opt" style="width:30px; height:30px; border:1px solid #555; padding:2px;" onclick="openIconPicker(${i})">
+                    ${(icon !== 'none' && ICONS[icon]) ? ICONS[icon] : '<span style="font-size:0.8rem;">Icon</span>'}
+                  </button>
+                  <input type="color" value="${color}" onchange="updateBtnColor(${i}, this.value)" style="width:30px; height:20px; border:none; background:none; cursor:pointer;">
+                </div>
+                <input type="text" class="config-name-input" value="${label}" maxlength="8" onchange="updateBtnLabel(${i}, this.value)">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <div style="display:flex; gap:2px; align-items:center;">
+                    <span style="font-size:0.7rem; color:#aaa;">ON:0x</span>
+                    <input type="text" value="${btnOnVals[i]}" maxlength="2" onchange="updateBtnVal(${i}, 'on', this.value)" style="width:40px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:16px;">
+                  </div>
+                   <div style="display:flex; gap:2px; align-items:center;">
+                    <span style="font-size:0.7rem; color:#aaa;">OFF:0x</span>
+                    <input type="text" value="${btnOffVals[i]}" maxlength="2" onchange="updateBtnVal(${i}, 'off', this.value)" style="width:40px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:16px;">
+                    </div>
+                 </div>
+                 <button class="action-btn btn-orange" style="padding: 5px 10px; font-size: 0.8rem; width: auto;" onclick="saveBtnConfig(${i})">SET</button>
+                 <div style="display:flex; flex-direction:column; gap:2px; margin-left:5px;">
+                   <div style="display:flex; gap:2px; align-items:center;">
+                     <span style="font-size:0.7rem; color:#aaa;">OnDly</span>
+                     <input type="number" value="${btnOnDelays[i]}" step="0.1" min="0" onchange="updateBtnDelay(${i}, 'on', this.value)" style="width:50px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:14px;">
+                   </div>
+                   <div style="display:flex; gap:2px; align-items:center;">
+                     <span style="font-size:0.7rem; color:#aaa;">OffDly</span>
+                     <input type="number" value="${btnOffDelays[i]}" step="0.1" min="0" onchange="updateBtnDelay(${i}, 'off', this.value)" style="width:50px; background:#222; border:1px solid #555; color:white; font-family:monospace; text-align:center; padding:4px; font-size:14px;">
+                   </div>
+                 </div>
+                <div class="mini-switch">
+                    <button class="mini-opt ${!isMom ? 'selected' : ''}" onclick="changeBtnMode(${i}, 'toggle')">Tog</button>
+                    <button class="mini-opt ${isMom ? 'selected' : ''}" onclick="changeBtnMode(${i}, 'momentary')">Pul</button>
+                </div>
+                 <div style="display:flex; flex-direction:column; align-items:center; margin-left:5px;">
+                   <span style="font-size:0.6rem; color:#888;">Endian</span>
+                   <div class="mini-switch">
+                     <button class="mini-opt ${endian === 'big' ? 'selected' : ''}" onclick="updateBtnEndian(${i}, 'big')">B</button>
+                     <button class="mini-opt ${endian === 'little' ? 'selected' : ''}" onclick="updateBtnEndian(${i}, 'little')">L</button>
+                   </div>
+                 </div>
+            `;
+                container.appendChild(row);
+            });
+        }
+        function changeBtnMode(index, mode) { btnModes[index] = mode; localStorage.setItem("btnModes", JSON.stringify(btnModes)); renderConfigList(); }
+        function updateBtnLabel(index, newName) { btnLabels[index] = newName; localStorage.setItem("btnLabels", JSON.stringify(btnLabels)); const labelSpan = document.getElementById(`label-${index + 1}`); if (labelSpan) labelSpan.textContent = newName; }
+        function updateBtnVal(index, type, val) {
+            if (!/^[0-9A-Fa-f]{1,2}$/.test(val)) { alert("Invalid Hex"); renderConfigList(); return; }
+            val = val.toUpperCase().padStart(2, '0');
+            if (type === 'on') { btnOnVals[index] = val; localStorage.setItem("btnOnVals", JSON.stringify(btnOnVals)); } else { btnOffVals[index] = val; localStorage.setItem("btnOffVals", JSON.stringify(btnOffVals)); }
+        }
+        async function syncAllBtnConfigs() {
+            if (!rxChar) return;
+            const overlay = document.getElementById("sync-overlay"); if (overlay) overlay.style.display = "flex";
+            log("Syncing Config to Device...");
+            for (let i = 0; i < 8; i++) { 
+                sendBtnConfig(i); 
+                await new Promise(r => setTimeout(r, 150)); 
+            }
+            if (overlay) overlay.style.display = "none"; log("Config Sync Complete");
+        }
+        function saveBtnConfig(index) { sendBtnConfig(index); alert(`Button ${index + 1} のON/OFF設定をデバイスに保存しました。`); }
+        function sendBtnConfig(inIdx) {
+            if (!rxChar) return;
+            const onVal = parseInt(btnOnVals[inIdx], 16);
+            const offVal = parseInt(btnOffVals[inIdx], 16);
+            if (isNaN(onVal) || isNaN(offVal)) return;
+            const cmd = `CFGBTN=${inIdx},${onVal},${offVal}`;
+            rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => console.log("TX Config Err"));
+        }
+        function updateBtnDelay(index, type, val) {
+            let v = parseFloat(val); if (isNaN(v) || v < 0) v = 0;
+            if (type === 'on') { btnOnDelays[index] = v; localStorage.setItem("btnOnDelays", JSON.stringify(btnOnDelays)); } else { btnOffDelays[index] = v; localStorage.setItem("btnOffDelays", JSON.stringify(btnOffDelays)); }
+        }
+        function updateBtnColor(index, newColor) { btnColors[index] = newColor; localStorage.setItem("btnColors", JSON.stringify(btnColors)); const btn = document.getElementById(`btn-${index + 1}`); if (btn) { btn.style.setProperty('--btn-color', newColor); } }
+        function updateBtnEndian(index, mode) { btnEndian[index] = mode; localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); renderConfigList(); }
+        function applyPreset(type) { if (type === 'normal') { btnEndian = Array(8).fill('big'); } else { btnEndian = Array(8).fill('little'); } localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); renderConfigList(); }
+        
+        function setVibe(state) { cfgVibe = state; localStorage.setItem("cfgVibe", JSON.stringify(cfgVibe)); }
+        function setSound(state) { cfgSound = state; localStorage.setItem("cfgSound", JSON.stringify(cfgSound)); if (state) initAudio(); }
+        
+        let currentIconBtnIndex = -1;
+        function openIconPicker(index) {
+            currentIconBtnIndex = index; const overlay = document.getElementById('icon-picker-overlay'); const grid = document.getElementById('icon-picker-grid');
+            let html = `<button onclick="selectIcon('none')" style="padding:10px; background:#444; border:none; color:white; border-radius:5px;">TXT</button>`;
+            for (const [key, svg] of Object.entries(ICONS)) { if (key === 'none') continue; html += `<button onclick="selectIcon('${key}')" style="padding:5px; background:none; border:1px solid #444; color:white; border-radius:5px; height:40px; width:40px;">${svg}</button>`; }
+            grid.innerHTML = html; overlay.style.display = 'flex';
+        }
+        function closeIconPicker() { document.getElementById('icon-picker-overlay').style.display = 'none'; }
+        function selectIcon(iconKey) { if (currentIconBtnIndex >= 0) { btnIcons[currentIconBtnIndex] = iconKey; localStorage.setItem("btnIcons", JSON.stringify(btnIcons)); renderConfigList(); renderKeypadGrid(); closeIconPicker(); } }
+        let wakeLock = null;
+        async function requestWakeLock() { try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); console.log('Wake Lock is active!'); wakeLock.addEventListener('release', () => { console.log('Wake Lock released'); }); } } catch (err) { console.error(`Wake Lock Error: ${err.name}, ${err.message}`); } }
+        document.addEventListener('visibilitychange', async () => { if (wakeLock !== null && document.visibilityState === 'visible') { await requestWakeLock(); } });
+        function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } else if (audioCtx.state === 'suspended') { audioCtx.resume(); } }
+        function triggerFeedback() { if (cfgVibe && navigator.vibrate) { navigator.vibrate(15); } if (cfgSound && audioCtx) { const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination); osc.type = 'square'; osc.frequency.value = 2000; gain.gain.setValueAtTime(0.1, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.05); } }
+        function toggleFullscreen() { if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(e => { }); } else { if (document.exitFullscreen) { document.exitFullscreen(); } } }
+        function enterFullscreen() { if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(e => { }); } }
+        function showMain() { document.getElementById("view-settings").style.display = "none"; document.getElementById("view-meter").style.display = "none"; document.getElementById("view-settings").classList.remove("active"); document.getElementById("view-meter").classList.remove("active"); const v = document.getElementById("view-main"); v.style.display = "flex"; v.classList.add("active"); }
+        function showMeter() { document.getElementById("view-main").style.display = "none"; document.getElementById("view-settings").style.display = "none"; document.getElementById("view-main").classList.remove("active"); document.getElementById("view-settings").classList.remove("active"); const v = document.getElementById("view-meter"); v.style.display = "flex"; v.classList.add("active"); }
+        function showSettings() { renderConfigList(); loadRxSlotFromUI(); document.getElementById("view-main").style.display = "none"; document.getElementById("view-meter").style.display = "none"; document.getElementById("view-main").classList.remove("active"); document.getElementById("view-meter").classList.remove("active"); const v = document.getElementById("view-settings"); v.style.display = "flex"; v.classList.add("active"); }
+        function log(t) { const el = document.getElementById("log"); const time = new Date().toLocaleTimeString().split(' ')[0]; el.textContent = `[${time}] ${t}\n` + el.textContent.substring(0, 1000); }
+        function updateStatus(connected) {
+            isConnected = connected; const ind = document.getElementById("status-display"); const overlay = document.getElementById("connect-overlay"); const keypad = document.getElementById("keypad"); const discRow = document.getElementById("disconnect-row");
+            if (connected) { ind.textContent = "🟢 BLE"; ind.classList.add("connected"); overlay.style.display = "none"; keypad.classList.add("visible"); discRow.style.display = "flex"; resetWatchdog(); document.getElementById("can-status-display").style.display = "block"; updateMainSoundIcon(); } else { ind.textContent = "🔴 Disconnected"; ind.classList.remove("connected"); ind.classList.remove("stalled"); overlay.style.display = "flex"; keypad.classList.remove("visible"); discRow.style.display = "none"; document.getElementById("can-status-display").style.display = "none"; clearTimeout(watchdogTimer); }
+        }
+        function resetWatchdog() { if (!isConnected) return; const ind = document.getElementById("status-display"); if (ind.textContent.includes("No Resp")) { ind.textContent = "🟢 BLE"; ind.style.color = "#00ff00"; ind.style.borderColor = "#00ff00"; ind.classList.remove("stalled"); ind.classList.add("connected"); } clearTimeout(watchdogTimer); watchdogTimer = setTimeout(() => { ind.textContent = "⚠️ No Resp"; ind.style.color = "orange"; ind.style.borderColor = "orange"; ind.classList.remove("connected"); ind.classList.add("stalled"); }, WATCHDOG_TIMEOUT); }
+        function updateCanStatus(st) { const el = document.getElementById("can-status-display"); if (!el) return; if (el.style.display === "none") el.style.display = "block"; if (st === "CAN_OK") { el.textContent = "CAN: OK"; el.className = "status-indicator can-ok"; el.style.color = "#00ff00"; el.style.borderColor = "#00ff00"; } else { el.textContent = "CAN: ERR"; el.className = "status-indicator can-err"; el.style.color = "#ff0000"; el.style.borderColor = "#ff0000"; } }
+        async function handleStartConnect() { initAudio(); enterFullscreen(); requestWakeLock(); await connect(); }
+        async function connect() {
+            try {
+                device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'M5' }], optionalServices: [SERVICE_UUID] });
+                gattServer = await device.gatt.connect(); device.addEventListener('gattserverdisconnected', () => { log("Disconnected Event"); updateStatus(false); });
+                const svc = await gattServer.getPrimaryService(SERVICE_UUID); rxChar = await svc.getCharacteristic(RX_UUID); txChar = await svc.getCharacteristic(TX_UUID);
+                await txChar.startNotifications(); txChar.addEventListener('characteristicvaluechanged', handleNotifications);
+                showMain(); updateStatus(true); log("BLE Ready"); setTimeout(syncAllBtnConfigs, 500);
+            } catch (e) { log("Err: " + e); updateStatus(false); }
+        }
+        function disconnect() { if (device && device.gatt.connected) { device.gatt.disconnect(); updateStatus(false); } }
+        
+        // --- METER UPDATE LOGIC ---
+        function updateMeterValue(elId, unitId, rawVal, cfgSlotIdx) {
+            // Get config for this slot
+            const cfg = rxConfigs[cfgSlotIdx];
+            if(!cfg) return;
+
+            let signedVal = rawVal;
+            if (cfg.mode == 3) { if (signedVal & 0x80) signedVal -= 0x100; }
+            else if (cfg.mode == 4 || cfg.mode == 5) { if (signedVal & 0x8000) signedVal -= 0x10000; }
+
+            const calcVal = (signedVal * cfg.mul) + cfg.add;
+            const dispVal = calcVal.toFixed(cfg.dec);
+
+            const el = document.getElementById(elId);
+            const unitEl = document.getElementById(unitId);
+            
+            if (el) {
+                el.textContent = dispVal;
+                let isAlarm = false;
+                if (cfg.warnVal !== null && !isNaN(cfg.warnVal)) {
+                    if (cfg.alarmMode === 'low') { if (calcVal <= cfg.warnVal) isAlarm = true; }
+                    else { if (calcVal >= cfg.warnVal) isAlarm = true; }
+                }
+                
+                if (isAlarm) {
+                    el.style.color = "#FFF"; setTimeout(() => el.style.color = "#FF0000", 100);
+                    el.classList.add("temp-warning");
+                    el.classList.remove("val-yellow"); el.classList.remove("val-gray"); el.classList.add("val-red");
+                    
+                    if (Date.now() - lastRxWarnTimes[cfgSlotIdx] > 5000) {
+                        speakVoice(cfg.label + "、警告！");
+                        lastRxWarnTimes[cfgSlotIdx] = Date.now();
+                    }
+                } else {
+                    el.style.color = "#FFF"; setTimeout(() => el.style.color = cfg.color, 100);
+                    el.classList.remove("temp-warning"); el.classList.remove("val-red"); el.classList.remove("val-gray");
+                    el.style.textShadow = `0 0 10px ${cfg.color}66`;
+                }
+            }
+            if (unitEl) unitEl.textContent = cfg.unit;
+            return { disp: dispVal, raw: rawVal };
+        }
+
+        function handleNotifications(event) {
+            const decoder = new TextDecoder('utf-8'); const cmd = decoder.decode(event.target.value); const cleanedCmd = cmd.replace(/(\r\n|\n|\r)/gm, "").trim(); log("RX: " + cleanedCmd); resetWatchdog();
+            
+            if (cleanedCmd.startsWith("ID=")) { const val = cleanedCmd.split("=")[1].replace("0x", "").replace("0X", "").toUpperCase(); log("Sync ID: " + val); canIdVal = val; localStorage.setItem("canIdVal", canIdVal); const el = document.getElementById("can-id-input"); if (el) el.value = canIdVal; }
+            else if (cleanedCmd.startsWith("KID=")) { const val = cleanedCmd.split("=")[1].replace("0x", "").replace("0X", "").toUpperCase(); log("Sync KID: " + val); kMeterIdVal = val; localStorage.setItem("kMeterIdVal", kMeterIdVal); const el = document.getElementById("k-meter-id-input"); if (el) el.value = kMeterIdVal; }
+            
+            // --- METER UPDATES (Using Array Config) ---
+            else if (cleanedCmd.startsWith("VAL=")) {
+                let raw = parseInt(cleanedCmd.split("=")[1]);
+                const res = updateMeterValue("meter-val-2", "meter-unit-2", raw, 0); // Slot 0
+                // Live preview logic only for currently selected slot in config
+                if (currentRxSlot === 0) {
+                    document.getElementById("rx-live-val").textContent = res.disp;
+                }
+            }
+            // Handling VAL2 through VAL7
+            else if (cleanedCmd.match(/^VAL[2-7]=/)) {
+                const parts = cleanedCmd.split("=");
+                const key = parts[0];
+                const raw = parseInt(parts[1]);
+                const slotNum = parseInt(key.replace("VAL", "")); // 2...7
+                const arrIdx = slotNum - 1; // 1...6 (Slot 1-6 in array)
+                const res = updateMeterValue(`meter-val-${slotNum+1}`, `meter-unit-${slotNum+1}`, raw, arrIdx);
+                
+                if (currentRxSlot === arrIdx) {
+                    document.getElementById("rx-live-val").textContent = res.disp;
+                }
+            }
+
+            // --- Exhaust Temp (Fixed) ---
+            else if (cleanedCmd.startsWith("TEMP=")) {
+                const val = cleanedCmd.split("=")[1]; const el = document.getElementById("meter-val-1");
+                if (el) {
+                    el.textContent = val; let tempVal = parseInt(val);
+                    let isAlarm = (!isNaN(tempVal) && tempVal >= tempWarnVal);
+                    if (isAlarm) { 
+                        el.classList.add("temp-warning"); el.classList.remove("val-cyan"); el.classList.add("val-red");
+                        el.style.color = "#FF0000";
+                        if (Date.now() - lastTempWarnTime > 5000) { speakVoice("排気温度、警告！"); lastTempWarnTime = Date.now(); } 
+                    } else { 
+                        el.classList.remove("temp-warning"); el.classList.remove("val-red");
+                        el.style.color = tempColor; el.style.textShadow = `0 0 10px ${tempColor}66`;
+                    }
+                }
+            }
+            else if (cleanedCmd.startsWith("STATE=")) {
+                const states = cleanedCmd.substring(6).split(',');
+                if (states.length >= 8) {
+                    const now = Date.now();
+                    for (let i = 0; i < 8; i++) {
+                        const s = states[i]; if (s === undefined) continue;
+                        if (btnModes[i] === 'momentary') { if (now - lastPulseTimes[i] < 500) { continue; } }
+                        let receivedVal = parseInt(s, 10); if (btnEndian[i] === 'little') { receivedVal = reverseBits(receivedVal); }
+                        const onVal = parseInt(btnOnVals[i], 16); btnStates[i] = (receivedVal === onVal); updateBtnVisual(i + 1, btnStates[i]);
+                    }
+                }
+            } else if (cleanedCmd.startsWith("RXID=")) {
+                const val = cleanedCmd.split("=")[1]; log("✅ RX ID confirmed by device: " + val);
+                const statusEl = document.getElementById("rx-config-status"); if (statusEl) { statusEl.textContent = "✅ Device confirmed: " + val; statusEl.style.color = "#51cf66"; }
+            }
+            else if (cleanedCmd.startsWith("STATUS=")) { const st = cleanedCmd.substring(7); updateCanStatus(st); }
+        }
+        function updateBtnVisual(n, isActive) { const btn = document.getElementById('btn-' + n); if (!btn) return; if (isActive) { btn.classList.add('active'); } else { btn.classList.remove('active'); } }
+        function sendState(n, state) {
+            const btnIndex = n - 1; btnStates[btnIndex] = state; updateBtnVisual(n, state);
+            if (rxChar) {
+                const valStr = state ? btnOnVals[btnIndex] : btnOffVals[btnIndex]; let valInt = parseInt(valStr, 16);
+                if (btnEndian[btnIndex] === 'little') { valInt = reverseBits(valInt); }
+                const targetN = btnIndex + 1; const cmd = `${targetN}=${valInt}`; rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => { });
+            }
+        }
+        function reverseBits(b) { b = b & 0xFF; let r = 0; for (let i = 0; i < 8; i++) { if ((b >> i) & 1) { r |= 1 << (7 - i); } } return r; }
+        async function handlePointerDown(n, e) {
+            if (e) { e.preventDefault(); } triggerFeedback(); const btnEl = document.getElementById(`btn-${n}`); if (btnEl) btnEl.classList.add('pressing'); const idx = n - 1;
+            const currentState = btnStates[idx]; const targetState = !currentState; const delay = targetState ? btnOnDelays[idx] : btnOffDelays[idx];
+            if (delay > 0) { holdTimers[idx] = setTimeout(() => { executeAction(n); holdTimers[idx] = null; if (btnEl) btnEl.classList.remove('pressing'); }, delay * 1000); } else { executeAction(n); if (btnEl) btnEl.classList.remove('pressing'); }
+        }
+        function handlePointerUp(n, e) { if (e) e.preventDefault(); const idx = n - 1; if (holdTimers[idx]) { clearTimeout(holdTimers[idx]); holdTimers[idx] = null; } const btnEl = document.getElementById(`btn-${n}`); if (btnEl) btnEl.classList.remove('pressing'); }
+        function executeAction(n) { const idx = n - 1; const isMomentary = (btnModes[idx] === 'momentary'); if (isMomentary) { triggerPulse(n); } else { const newState = !btnStates[idx]; sendState(n, newState); } }
+        function triggerPulse(n) { const idx = n - 1; sendState(n, true); setTimeout(() => { sendState(n, false); }, 150); lastPulseTimes[idx] = Date.now(); }
+        
+        function setCanId() { 
+            const el = document.getElementById("can-id-input"); const val = el.value; 
+            if (val.match(/^[0-9A-Fa-f]+$/)) { 
+                log(`Set CAN ID: 0x${val}`); localStorage.setItem("canIdVal", val); canIdVal = val; 
+                if (rxChar) { const cmd = `ID=${val}`; rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => log("TX ERR ID")); } 
+            } else { alert("Invalid Hex ID"); } 
+        }
+        function setKMeterId() { 
+            const el = document.getElementById("k-meter-id-input"); const val = el.value; 
+            if (val.match(/^[0-9A-Fa-f]+$/)) { 
+                log(`Set K-Meter ID: 0x${val}`); localStorage.setItem("kMeterIdVal", val); kMeterIdVal = val; 
+                if (rxChar) { const cmd = `KID=${val}`; rxChar.writeValue(new TextEncoder().encode(cmd)).catch(e => log("TX ERR KID")); } 
+            } else { alert("Invalid Hex ID"); } 
+        }
+
+        function exportConfig() {
+            const config = { version: "8.1.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2)); const downloadAnchor = document.createElement('a'); downloadAnchor.setAttribute("href", dataStr); downloadAnchor.setAttribute("download", "m5_can_config_v3_8.json"); document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove(); log("Config Exported");
+        }
+        function importConfig() { document.getElementById('import-file').click(); }
+        function handleFileSelect(input) {
+            const file = input.files[0]; if (!file) return; const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const config = JSON.parse(e.target.result);
+                    if (config.btnLabels) { btnLabels = config.btnLabels; localStorage.setItem("btnLabels", JSON.stringify(btnLabels)); }
+                    if (config.btnModes) { btnModes = config.btnModes; localStorage.setItem("btnModes", JSON.stringify(btnModes)); }
+                    if (config.btnColors) { btnColors = config.btnColors; localStorage.setItem("btnColors", JSON.stringify(btnColors)); }
+                    if (config.btnOnVals) { btnOnVals = config.btnOnVals; localStorage.setItem("btnOnVals", JSON.stringify(btnOnVals)); }
+                    if (config.btnOffVals) { btnOffVals = config.btnOffVals; localStorage.setItem("btnOffVals", JSON.stringify(btnOffVals)); }
+                    if (config.btnEndian) { btnEndian = config.btnEndian; localStorage.setItem("btnEndian", JSON.stringify(btnEndian)); }
+                    if (config.btnIcons) { btnIcons = config.btnIcons; localStorage.setItem("btnIcons", JSON.stringify(btnIcons)); }
+                    if (config.cfgVibe !== undefined) { cfgVibe = config.cfgVibe; localStorage.setItem("cfgVibe", JSON.stringify(cfgVibe)); }
+                    if (config.cfgSound !== undefined) { cfgSound = config.cfgSound; localStorage.setItem("cfgSound", JSON.stringify(cfgSound)); }
+                    if (config.canId) { document.getElementById("can-id-input").value = config.canId; canIdVal = config.canId; localStorage.setItem("canIdVal", canIdVal); }
+                    if (config.kMeterId) { document.getElementById("k-meter-id-input").value = config.kMeterId; kMeterIdVal = config.kMeterId; localStorage.setItem("kMeterIdVal", kMeterIdVal); }
+                    if (config.tempWarnVal) { tempWarnVal = config.tempWarnVal; localStorage.setItem("tempWarnVal", tempWarnVal); document.getElementById("temp-alarm-input").value = tempWarnVal; }
+                    if (config.tempColor) { tempColor = config.tempColor; localStorage.setItem("tempColor", tempColor); document.getElementById("temp-color-input").value = tempColor; }
+                    if (config.btnOnDelays) { btnOnDelays = config.btnOnDelays; localStorage.setItem("btnOnDelays", JSON.stringify(btnOnDelays)); }
+                    if (config.btnOffDelays) { btnOffDelays = config.btnOffDelays; localStorage.setItem("btnOffDelays", JSON.stringify(btnOffDelays)); }
+                    
+                    if (config.rxConfigs) { rxConfigs = config.rxConfigs; localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs)); }
+
+                    log("Config Loaded"); alert("Configuration Loaded Successfully"); renderConfigList(); renderKeypadGrid(); loadRxSlotFromUI(); updateLabelsOnMeterView();
+                } catch (err) { log("Import Err: " + err); alert("Failed to load config"); }
+            }; reader.readAsText(file); input.value = '';
+        }
+        function renderKeypadGrid() {
+            const container = document.getElementById("keypad"); container.innerHTML = "";
+            for (let i = 1; i <= 8; i++) {
+                const b = document.createElement("div"); b.id = `btn-${i}`; b.className = "key-btn";
+                const iconKey = btnIcons[i - 1]; let innerHTML = '';
+                if (iconKey && iconKey !== 'none' && ICONS[iconKey]) { innerHTML = `<div style="width:50%; height:50%; margin-bottom:5px;">${ICONS[iconKey]}</div><span id="label-${i}" class="btn-label" style="font-size:0.9rem;">${btnLabels[i - 1]}</span>`; } else { innerHTML = `<span id="label-${i}" class="btn-label">${btnLabels[i - 1]}</span>`; }
+                b.innerHTML = innerHTML; b.style.setProperty('--btn-color', btnColors[i - 1]);
+                b.addEventListener('pointerdown', (e) => handlePointerDown(i, e)); b.addEventListener('pointerup', (e) => handlePointerUp(i, e)); b.addEventListener('pointerleave', (e) => handlePointerUp(i, e));
+                b.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false }); b.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); return false; }); container.appendChild(b);
+            }
+        }
+        window.addEventListener('contextmenu', (e) => { if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) { return true; } e.preventDefault(); return false; }, { capture: true });
+        renderConfigList(); renderKeypadGrid(); updateStatus(false);
+        function updateMainSoundIcon() { const btn = document.getElementById("main-sound-btn"); if (btn) { btn.innerHTML = cfgSound ? "🔊" : "🔇"; btn.style.color = cfgSound ? "#0f0" : "#888"; } }
+        function toggleSoundMain() { setSound(!cfgSound); updateMainSoundIcon(); }
+        updateMainSoundIcon();
+        const synth = window.speechSynthesis;
+        function speakVoice(text) { if (synth.speaking) synth.cancel(); const utter = new SpeechSynthesisUtterance(text); utter.lang = "ja-JP"; utter.rate = 1.2; synth.speak(utter); }
+        
+        /* --- VOICE RECOGNITION (Added Back in V3.81) --- */
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; 
+        let recognition = null; 
+        let isListening = false;
+        
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition(); 
+            recognition.lang = 'ja-JP'; 
+            recognition.continuous = true; 
+            recognition.interimResults = false;
+            
+            recognition.onresult = (event) => { 
+                const last = event.results.length - 1; 
+                const transcript = event.results[last][0].transcript.trim(); 
+                log("Voice: " + transcript); 
+                
+                if (transcript.includes("キーパッド") || transcript.includes("キーパット")) {
+                      showMain();
+                      speakVoice("キーパッドを表示");
+                      return;
+                }
+                if (transcript.includes("ダッシュメーター") || transcript.includes("メーター")) {
+                      showMeter();
+                      speakVoice("ダッシュメーターを表示");
+                      return;
+                }
+                btnLabels.forEach((label, index) => { 
+                    const cleanLabel = label.replace(/\s+/g, ''); 
+                    const cleanVoice = transcript.replace(/\s+/g, ''); 
+                    if (cleanVoice.includes(cleanLabel) && cleanLabel.length > 0) { 
+                        handleVoiceCommand(index, transcript); 
+                    } 
+                }); 
+            };
+            
+            recognition.onend = () => { 
+                if (isListening) recognition.start(); 
+                updateMicIcon(); 
+            };
+            
+            recognition.onerror = (e) => { 
+                console.log("Voice Err:", e.error); 
+                if (['not-allowed', 'network', 'service-not-allowed', 'audio-capture'].includes(e.error)) { 
+                    isListening = false; 
+                    speakVoice("音声認識エラー"); 
+                    updateMicIcon(); 
+                } 
+            };
+        }
+        
+        function handleVoiceCommand(index, transcript) { 
+            const btnNum = index + 1; 
+            const currentState = btnStates[index]; 
+            const label = btnLabels[index]; 
+            
+            // Check Lock
+            // Note: In V3.81, auth is not fully implemented in UI but array exists
+            // let isLock = false; if(typeof btnAuth !== 'undefined') isLock = btnAuth[index];
+            // if (isLock) { speakVoice(label + "はロックされています。"); return; } 
+            
+            if (btnModes[index] === 'momentary') { 
+                executeAction(btnNum); 
+                speakVoice(label + "、実行"); 
+                return; 
+            } 
+            
+            const isOffCommand = transcript.includes("オフ") || transcript.includes("停止") || transcript.includes("切") || transcript.toLowerCase().includes("off"); 
+            if (currentState) { 
+                if (isOffCommand) { executeAction(btnNum); speakVoice(label + "をオフにしました"); } 
+                else { speakVoice(label + "は、既にオンです"); } 
+            } else { 
+                if (isOffCommand) { speakVoice(label + "は、既にオフです"); } 
+                else { executeAction(btnNum); speakVoice(label + "をオンにしました"); } 
+            } 
+        }
+        
+        function injectMicButton() { 
+            const headerGroup = document.querySelector('.main-header > div:last-child'); 
+            if (!headerGroup) return; 
+            
+            // Avoid duplicates
+            if (document.getElementById("mic-toggle-btn")) return;
+            
+            const micBtn = document.createElement('button'); 
+            micBtn.id = "mic-toggle-btn"; 
+            micBtn.className = "header-btn"; 
+            micBtn.innerHTML = "🎙️"; 
+            micBtn.style.fontSize = "1.2rem"; 
+            micBtn.onclick = toggleVoiceControl; 
+            
+            // Insert as first item in the right group
+            headerGroup.insertBefore(micBtn, headerGroup.firstChild); 
+        }
+        
+        function toggleVoiceControl() { 
+            if (!recognition) { alert("このブラウザは音声認識に対応していません"); return; } 
+            isListening = !isListening; 
+            if (isListening) { recognition.start(); speakVoice("音声操作、開始"); } 
+            else { recognition.stop(); speakVoice("停止します"); } 
+            updateMicIcon(); 
+        }
+        
+        function updateMicIcon() { 
+            const micBtn = document.getElementById("mic-toggle-btn"); 
+            if (!micBtn) return; 
+            if (isListening) { 
+                micBtn.innerHTML = "🔴"; 
+                micBtn.style.color = "#ff4444"; 
+                micBtn.style.animation = "pulse-mic 1.5s infinite"; 
+            } else { 
+                micBtn.innerHTML = "🎙️"; 
+                micBtn.style.color = "#aaa"; 
+                micBtn.style.animation = "none"; 
+            } 
+        }
+    </script>
+</body>
+</html>
