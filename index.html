@@ -2,9 +2,8 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>M5Atom CAN Keypad (v3.83 Final Fix)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>M5Atom CAN Keypad (v3.83 Final)</title>
     <style>
         /* Reset & Base */
         html, body {
@@ -14,175 +13,304 @@
             touch-action: manipulation; display: flex; flex-direction: column;
         }
         /* --- Views --- */
-        .view-container {
-            display: none; flex: 1; flex-direction: column; box-sizing: border-box;
-            padding: 10px; width: 100%; height: 100%; overflow: hidden;
-        }
+        .view-container { display: none; flex: 1; flex-direction: column; box-sizing: border-box; padding: 10px; width: 100%; height: 100%; overflow: hidden; }
         .view-container.active { display: flex; }
-        /* --- Main View --- */
-        #view-main { position: relative; }
-        .main-header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 5px; padding: 0 5px; flex-shrink: 0; height: 40px;
-        }
-        .status-group { display: flex; align-items: center; gap: 10px; }
+        
+        /* --- Main UI Elements --- */
+        .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; padding: 0 5px; flex-shrink: 0; height: 40px; }
         .status-indicator { font-size: 0.9rem; color: #888; font-weight: bold; }
         .status-indicator.connected { color: #28a745; }
-        .header-btn {
-            background: none; border: none; font-size: 1.5rem; cursor: pointer;
-            padding: 5px; color: #aaa; line-height: 1;
-        }
-        /* Connect Overlay */
-        #connect-overlay {
-            display: flex; flex-direction: column; justify-content: center; align-items: center;
-            width: 100%; height: 100%; position: absolute; top: 40px; left: 0; bottom: 0;
-            background: #1a1a1a; z-index: 10;
-        }
-        #start-btn {
-            width: 200px; height: 200px; border-radius: 50%; border: 4px solid #007bff;
-            background: rgba(0, 123, 255, 0.1); color: #007bff; font-size: 1.5rem; font-weight: bold;
-            cursor: pointer; box-shadow: 0 0 20px rgba(0, 123, 255, 0.3); transition: all 0.2s ease;
-            display: flex; justify-content: center; align-items: center; text-align: center;
-        }
-        #keypad {
-            display: none; gap: 8px; flex-grow: 1; width: 100%; max-width: 600px; align-self: center;
-            grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr);
-        }
+        .header-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; padding: 5px; color: #aaa; }
+        
+        #keypad { display: none; gap: 8px; flex-grow: 1; width: 100%; max-width: 600px; align-self: center; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); }
         #keypad.visible { display: grid; }
-        @media (orientation: landscape) {
-            #keypad { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); }
-            .main-header { margin-bottom: 2px; height: 30px; }
-            #connect-overlay { top: 30px; }
-        }
+        @media (orientation: landscape) { #keypad { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); } }
+
         .key-btn {
-            background: #333; border: 3px solid var(--btn-color, #777); border-radius: 12px;
-            color: var(--btn-color, #fff); font-weight: bold; cursor: pointer;
-            display: flex; justify-content: center; align-items: center; flex-direction: column;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); position: relative; text-align: center;
-            width: 100%; height: 100%; user-select: none; font-size: clamp(1rem, 5vw, 2rem);
-            transition: all 0.1s ease;
+            background: #333; border: 3px solid var(--btn-color, #777); border-radius: 12px; color: var(--btn-color, #fff); font-weight: bold;
+            display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center;
+            width: 100%; height: 100%; transition: all 0.1s ease; font-size: clamp(1rem, 5vw, 2rem);
         }
         .key-btn.active { background: var(--btn-color, #006000); color: #fff; box-shadow: 0 0 15px var(--btn-color, rgba(0, 255, 0, 0.4)); }
         .key-btn.pressing { transform: scale(0.95); opacity: 0.8; }
-        
-        /* --- Settings View --- */
+
+        /* --- Settings --- */
         #view-settings { background: #222; overflow-y: auto; align-items: center; }
-        .settings-header {
-            display: flex; width: 100%; align-items: center; margin-bottom: 20px;
-            padding-bottom: 10px; border-bottom: 1px solid #444; flex-shrink: 0;
-        }
         .settings-group { width: 100%; max-width: 450px; display: flex; flex-direction: column; gap: 15px; padding: 0 5px; box-sizing: border-box; }
-        .control-row { width: 100%; }
-        .action-btn { width: 100%; padding: 12px; font-size: 1rem; border-radius: 8px; border: none; color: white; cursor: pointer; font-weight: bold; }
+        .id-input-group { display: flex; align-items: center; background: #333; padding: 5px; border-radius: 8px; gap: 5px; width: 100%; box-sizing: border-box; }
+        .config-list { display: flex; flex-direction: column; gap: 8px; background: #2a2a2a; padding: 10px; border-radius: 8px; }
+        .config-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; background: #333; padding: 8px; border-radius: 6px; gap: 5px; }
+        
+        input, select { background: #222; border: 1px solid #555; color: white; padding: 8px; border-radius: 4px; text-align: center; font-family: monospace; }
+        .action-btn { width: 100%; padding: 12px; border-radius: 8px; border: none; color: white; font-weight: bold; cursor: pointer; }
         .btn-orange { background: #e67e22; } .btn-red { background: #dc3545; } .btn-blue { background: #007bff; } .btn-gray { background: #555; }
         
-        .id-input-group { display: flex; align-items: center; background: #333; padding: 5px; border-radius: 8px; gap: 5px; width: 100%; box-sizing: border-box; }
-        input, select { background: #222; border: 1px solid #555; color: white; padding: 8px; border-radius: 4px; text-align: center; font-family: monospace; font-size: 1rem; }
-
-        /* Button Configuration List (v3.7 Layout Restored) */
-        .config-list { display: flex; flex-direction: column; gap: 10px; background: #2a2a2a; padding: 10px; border-radius: 8px; }
-        .config-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; background: #333; padding: 10px; border-radius: 6px; gap: 8px; }
-        .config-name-input { flex: 1; min-width: 80px; font-size: 1rem; }
         .mini-switch { display: flex; background: #222; border-radius: 4px; padding: 2px; gap: 2px; }
-        .mini-opt { border: none; background: none; color: #666; font-size: 0.8rem; padding: 6px 8px; border-radius: 3px; cursor: pointer; }
+        .mini-opt { border: none; background: none; color: #666; font-size: 0.75rem; padding: 5px 8px; border-radius: 3px; cursor: pointer; }
         .mini-opt.selected { background: #555; color: #fff; font-weight: bold; }
 
-        /* Animations */
-        @keyframes pulse-mic { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
-        @keyframes blink-red { 0% { color: #ff0000; text-shadow: 0 0 10px #ff0000; } 50% { color: #880000; text-shadow: none; } 100% { color: #ff0000; text-shadow: 0 0 10px #ff0000; } }
-        .temp-warning { animation: blink-red 1s infinite; font-weight: bold; font-size: 1.4rem !important; }
-
-        /* Meter View */
-        #view-meter { background: #000; flex-direction: column; padding-top: 50px; }
-        #meter-grid { display: grid; gap: 8px; width: 100%; height: 100%; padding: 10px; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); }
+        /* --- Meter Grid --- */
+        #view-meter { background: #000; padding-top: 50px; }
+        #meter-grid { display: grid; gap: 8px; width: 100%; height: 100%; padding: 10px; box-sizing: border-box; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); }
         .meter-cell { background: #111; border: 2px solid #333; border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; }
-        .meter-label { position: absolute; top: 5px; width: 100%; text-align: center; color: #888; font-size: 0.8rem; font-weight: bold; }
-        .meter-value { font-family: monospace; font-weight: bold; font-size: clamp(1.5rem, 6vw, 2.5rem); color: #fff; }
-        .meter-unit { position: absolute; bottom: 5px; right: 10px; color: #666; font-size: 0.7rem; }
+        .meter-label { position: absolute; top: 5px; width: 100%; text-align: center; color: #888; font-size: 0.7rem; text-transform: uppercase; }
+        .meter-value { font-family: monospace; font-weight: bold; font-size: clamp(1.5rem, 6vw, 2.5rem); }
+        .val-cyan { color: #00FFFF; } .val-red { color: #FF0000; }
+        
+        @keyframes pulse-mic { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .temp-warning { animation: blink-red 1s infinite; }
+        @keyframes blink-red { 0%, 100% { color: #ff0000; } 50% { color: #440000; } }
     </style>
 </head>
 <body>
     <div id="view-meter" class="view-container">
-        <button class="meter-header-btn" style="position:absolute; top:10px; left:10px; padding:10px; background:#333; color:white; border:none; border-radius:5px;" onclick="showMain()">↩️ Back</button>
+        <button class="meter-header-btn" style="position:absolute; top:10px; left:10px; z-index:20; padding:10px;" onclick="showMain()">↩️ Back</button>
         <div id="meter-grid">
-            <div class="meter-cell"><div class="meter-label">Exhaust Temp</div><div id="meter-val-1" class="meter-value" style="color:#00FFFF;">--</div><div class="meter-unit">°C</div></div>
-            <div class="meter-cell"><div id="meter-label-2" class="meter-label">RX Monitor</div><div id="meter-val-2" class="meter-value" style="color:#FFD700;">---</div><div class="meter-unit" id="meter-unit-2">RAW</div></div>
-            <div class="meter-cell"><div id="meter-label-3" class="meter-label">RX Mon 2</div><div id="meter-val-3" class="meter-value" style="color:#444;">---</div><div class="meter-unit" id="meter-unit-3"></div></div>
-            <div class="meter-cell"><div id="meter-label-4" class="meter-label">RX Mon 3</div><div id="meter-val-4" class="meter-value" style="color:#444;">---</div><div class="meter-unit" id="meter-unit-4"></div></div>
-            <div class="meter-cell"><div id="meter-label-5" class="meter-label">RX Mon 4</div><div id="meter-val-5" class="meter-value" style="color:#444;">---</div><div class="meter-unit" id="meter-unit-5"></div></div>
-            <div class="meter-cell"><div id="meter-label-6" class="meter-label">RX Mon 5</div><div id="meter-val-6" class="meter-value" style="color:#444;">---</div><div class="meter-unit" id="meter-unit-6"></div></div>
-            <div class="meter-cell"><div id="meter-label-7" class="meter-label">RX Mon 6</div><div id="meter-val-7" class="meter-value" style="color:#444;">---</div><div class="meter-unit" id="meter-unit-7"></div></div>
-            <div class="meter-cell"><div id="meter-label-8" class="meter-label">RX Mon 7</div><div id="meter-val-8" class="meter-value" style="color:#444;">---</div><div class="meter-unit" id="meter-unit-8"></div></div>
+            <div class="meter-cell"><div class="meter-label">Exhaust Temp</div><div id="meter-val-1" class="meter-value val-cyan">--</div><div style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;">°C</div></div>
+            <div class="meter-cell"><div id="meter-label-2" class="meter-label">RX Monitor</div><div id="meter-val-2" class="meter-value">---</div><div id="meter-unit-2" style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;"></div></div>
+            <div class="meter-cell"><div id="meter-label-3" class="meter-label">RX Mon 2</div><div id="meter-val-3" class="meter-value">---</div><div id="meter-unit-3" style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;"></div></div>
+            <div class="meter-cell"><div id="meter-label-4" class="meter-label">RX Mon 3</div><div id="meter-val-4" class="meter-value">---</div><div id="meter-unit-4" style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;"></div></div>
+            <div class="meter-cell"><div id="meter-label-5" class="meter-label">RX Mon 4</div><div id="meter-val-5" class="meter-value">---</div><div id="meter-unit-5" style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;"></div></div>
+            <div class="meter-cell"><div id="meter-label-6" class="meter-label">RX Mon 5</div><div id="meter-val-6" class="meter-value">---</div><div id="meter-unit-6" style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;"></div></div>
+            <div class="meter-cell"><div id="meter-label-7" class="meter-label">RX Mon 6</div><div id="meter-val-7" class="meter-value">---</div><div id="meter-unit-7" style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;"></div></div>
+            <div class="meter-cell"><div id="meter-label-8" class="meter-label">RX Mon 7</div><div id="meter-val-8" class="meter-value">---</div><div id="meter-unit-8" style="position:absolute;bottom:5px;right:10px;color:#666;font-size:0.7rem;"></div></div>
         </div>
     </div>
 
     <div id="view-main" class="view-container active">
         <div class="main-header">
-            <div class="status-group">
-                <div id="status-display" class="status-indicator">🔴 Disconnected</div>
-                <div id="can-status-display" class="status-indicator" style="display:none; font-size:0.8rem; border-left:1px solid #444; padding-left:10px;">CAN: --</div>
-            </div>
-            <div style="flex:1;"></div>
+            <div class="status-group"><div id="status-display" class="status-indicator">🔴 Disconnected</div></div>
             <div style="display:flex; gap:15px; align-items:center;">
-                <button id="meter-view-btn" class="header-btn" onclick="showMeter()">📟</button>
+                <button id="mic-toggle-btn" class="header-btn" onclick="toggleVoiceControl()">🎙️</button>
+                <button class="header-btn" onclick="showMeter()">📟</button>
                 <button id="main-sound-btn" class="header-btn" onclick="toggleSoundMain()">🔊</button>
-                <button class="header-btn" onclick="toggleFullscreen()">⛶</button>
-                <button id="settings-btn" class="header-btn" onclick="showSettings()">⚙️</button>
+                <button class="header-btn" onclick="showSettings()">⚙️</button>
             </div>
         </div>
-        <div id="connect-overlay"><button id="start-btn" onclick="handleStartConnect()">CONNECT<br>START</button></div>
-        <div id="sync-overlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:20; color:white; display:flex; align-items:center; justify-content:center;">⚙️ Syncing...</div>
+        <div id="connect-overlay"><button id="start-btn" onclick="handleStartConnect()">CONNECT START</button></div>
         <div id="keypad"></div>
     </div>
 
     <div id="view-settings" class="view-container">
-        <div class="settings-header">
-            <button class="back-btn" style="background:none; border:none; color:white; font-size:1.2rem;" onclick="showMain()">‹ Back</button>
-            <div style="flex-grow:1; text-align:center; font-weight:bold;">Settings (v3.83 Fix)</div>
-            <div style="width:50px;"></div>
-        </div>
-        
+        <div class="settings-header"><button class="header-btn" onclick="showMain()">‹ Back</button><span style="flex:1;text-align:center;font-weight:bold;">Settings (v3.83)</span><div style="width:40px;"></div></div>
         <div class="settings-group">
-            <div id="disconnect-row" style="display:none;"><button class="action-btn btn-red" onclick="disconnect()">🔴 Disconnect</button></div>
+            <div class="id-input-group"><label style="min-width:60px;">PAD:0x</label><input type="text" id="can-id-input" maxlength="3" style="flex:1;"><button class="btn-orange" style="padding:10px;" onclick="setCanId()">SET</button></div>
             
-            <div class="id-input-group"><label style="min-width:60px;">PAD:0x</label><input type="text" id="can-id-input" maxlength="3" style="flex:1;"><button class="action-btn btn-orange" style="width:auto; padding:8px 20px;" onclick="setCanId()">SET</button></div>
-            <div class="id-input-group"><label style="min-width:60px;">KID:0x</label><input type="text" id="k-meter-id-input" maxlength="3" style="flex:1;"><button class="action-btn btn-orange" style="width:auto; padding:8px 20px;" onclick="setKMeterId()">SET</button></div>
-            
-            <div style="display:flex; gap:5px;">
-                <div class="id-input-group" style="flex:0.4;"><input type="color" id="temp-color-input" style="width:100%; border:none; background:none;"></div>
-                <div class="id-input-group" style="flex:1; border:1px solid #d35400;"><label style="color:#e67e22;">Alm:°C</label><input type="number" id="temp-alarm-input" style="flex:1;"></div>
-            </div>
-
-            <div style="border-bottom:1px solid #444; padding-bottom:10px;">
-                <div style="color:#ccc; font-size:0.9rem; margin-bottom:5px;">Biometric Registration (Security)</div>
+            <div class="config-list" style="border: 1px solid #007bff;">
+                <div style="font-size:0.8rem; color:#007bff; font-weight:bold;">🔐 Biometric Enrollment</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div id="bio-status" style="font-size:0.8rem; color:#888;">Checking...</div>
-                    <div style="display:flex; gap:10px;">
-                        <button id="btn-bio-reg" class="action-btn btn-blue" style="width:auto; padding:8px 15px;" onclick="registerBiometric()">Register</button>
-                        <button id="btn-bio-clear" class="action-btn btn-red" style="width:auto; padding:8px 15px; display:none;" onclick="clearBiometric()">Clear</button>
+                    <div id="bio-status" style="font-size:0.8rem; color:#888;">Not Registered</div>
+                    <div style="display:flex; gap:5px;">
+                        <button class="btn-blue" style="padding:8px 15px; font-size:0.8rem;" onclick="registerBiometric()">Register</button>
+                        <button id="btn-bio-clear" class="btn-red" style="padding:8px 15px; font-size:0.8rem; display:none;" onclick="clearBiometric()">Clear</button>
                     </div>
                 </div>
             </div>
 
-            <div style="color:#ccc; font-size:0.9rem; margin-left:5px;">Button Configuration</div>
+            <div style="font-size:0.8rem; color:#aaa; margin-left:5px;">Button Configuration (ID:0x[PAD])</div>
             <div id="config-list-container" class="config-list"></div>
 
-            <div style="border-top:1px solid #444; padding-top:10px;">
-                <div style="color:#ccc; font-size:0.9rem; margin-bottom:5px;">📡 RX Monitor Config (7 Slots)</div>
-                <select id="rx-slot-select" onchange="loadRxSlotFromUI()" style="width:100%; background:#005cbf; font-weight:bold; padding:10px; margin-bottom:10px;">
-                     <option value="0">Monitor 1 (VAL)</option><option value="1">Monitor 2 (VAL2)</option><option value="2">Monitor 3 (VAL3)</option>
-                     <option value="3">Monitor 4 (VAL4)</option><option value="4">Monitor 5 (VAL5)</option><option value="5">Monitor 6 (VAL6)</option><option value="6">Monitor 7 (VAL7)</option>
+            <div class="config-list" style="border: 1px solid #e67e22;">
+                <div style="font-size:0.8rem; color:#e67e22; font-weight:bold;">📡 Multi-Meter Configuration</div>
+                <select id="rx-slot-select" onchange="loadRxSlotFromUI()" style="width:100%; background:#333; margin-bottom:5px;">
+                    <option value="0">Slot 1 (VAL)</option><option value="1">Slot 2 (VAL2)</option><option value="2">Slot 3 (VAL3)</option>
+                    <option value="3">Slot 4 (VAL4)</option><option value="4">Slot 5 (VAL5)</option><option value="5">Slot 6 (VAL6)</option><option value="6">Slot 7 (VAL7)</option>
                 </select>
-                <div class="id-input-group"><input type="color" id="rx-color-input" style="width:40px; height:35px; border:none; background:none;"><label style="min-width:40px;">Name</label><input type="text" id="rx-label-input" style="flex:1;"></div>
-                <div style="display:flex; gap:5px; margin-top:5px;">
-                    <div class="id-input-group" style="flex:1;"><label>ID</label><input type="text" id="rx-monitor-id-input" style="flex:1;"></div>
-                    <div class="id-input-group" style="flex:0.6;"><label>Idx</label><input type="number" id="rx-byte-index-input" style="flex:1;"></div>
-                    <select id="rx-mode-select" style="flex:1;"><option value="0">1B</option><option value="1">2B-LE</option><option value="2">2B-BE</option><option value="3">1B Sig</option><option value="4">2B-L Sig</option><option value="5">2B-B Sig</option></select>
+                <div style="display:flex; gap:5px; margin-bottom:5px;">
+                    <input type="color" id="rx-color-input" style="width:40px; height:40px; border:none; background:none;">
+                    <input type="text" id="rx-label-input" placeholder="Name" style="flex:1;">
                 </div>
-                <div style="display:flex; gap:5px; margin-top:5px;">
-                    <div class="id-input-group" style="flex:1;"><label>Mul</label><input type="text" id="rx-mul-input" style="flex:1;"></div>
-                    <div class="id-input-group" style="flex:1;"><label>Add</label><input type="text" id="rx-add-input" style="flex:1;"></div>
+                <div style="display:flex; gap:5px; margin-bottom:5px;">
+                    <div class="id-input-group" style="flex:1;"><label>ID</label><input type="text" id="rx-monitor-id-input" style="width:100%;"></div>
+                    <div class="id-input-group" style="flex:0.5;"><label>Idx</label><input type="number" id="rx-byte-index-input" style="width:100%;"></div>
                 </div>
-                <div style="display:flex; gap:5px; margin-top:5px;">
-                    <div class="id-input-group" style="flex:1;"><label>Dec</label><select id="rx-dec-select" style="flex:1;"><option value="0">0</option><option value="1">0.0</option><option value="2">0.00</option></select></div>
-                    <div class="id-input-group
+                <div style="display:flex; gap:5px; margin-bottom:5px;">
+                    <select id="rx-mode-select" style="flex:1;"><option value="0">1B</option><option value="1">2B-LE</option><option value="2">2B-BE</option></select>
+                    <input type="text" id="rx-mul-input" placeholder="Mul" style="flex:0.5;">
+                    <input type="text" id="rx-add-input" placeholder="Add" style="flex:0.5;">
+                </div>
+                <button class="action-btn btn-orange" onclick="setRxConfig()">SET & SAVE CURRENT SLOT</button>
+            </div>
+            
+            <div style="display:flex; gap:10px;"><button class="action-btn btn-blue" onclick="exportConfig()">⬇ Save Config</button><button class="action-btn btn-orange" onclick="importConfig()">⬆ Load Config</button></div>
+            <input type="file" id="import-file" style="display:none" onchange="handleFileSelect(this)">
+            <pre id="log" style="height:80px; background:#000; color:#0f0; font-size:0.6rem; overflow:auto; padding:5px;"></pre>
+        </div>
+    </div>
+
+    <div id="icon-picker-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; justify-content:center; align-items:center;">
+        <div style="background:#222; padding:20px; border-radius:10px; width:80%; max-width:300px;">
+            <div id="icon-picker-grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:10px;"></div>
+            <button class="action-btn btn-gray" style="margin-top:15px;" onclick="closeIconPicker()">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e", RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+        const ICONS = { none:null, power:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>', light:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-8.5h-2v3h2V2zm4.25 4.42l1.79 1.79 1.41-1.41-1.79-1.79-1.41 1.41zm5.75 4.08h-3v2h3v-2zm-12 11V6.5h14V17c0 2.21-1.79 4-4 4h-6c-2.21 0-4-1.79-4-4z"/></svg>', wiper:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="M5 12l2-6 8 0 2 6"/><path d="M14 6l-2-3"/></svg>', horn:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10v4h2l5 5v-14l-5 5H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>', music:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>', fan:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 11c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 2c0-3.31-2.69-6-6-6s-6 2.69-6 6c0 2.22 1.21 4.15 3 5.19V14.2c-1.21-.63-2-2.16-2-3.2 0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.79 2.57-2 3.2v3.99c1.79-1.04 3-2.97 3-5.19z"/></svg>' };
+
+        let btnLabels = JSON.parse(localStorage.getItem("btnLabels")) || Array.from({length:8}, (_,i)=>`BTN ${i+1}`);
+        let btnOnVals = JSON.parse(localStorage.getItem("btnOnVals")) || Array(8).fill('01');
+        let btnOffVals = JSON.parse(localStorage.getItem("btnOffVals")) || Array(8).fill('00');
+        let btnColors = JSON.parse(localStorage.getItem("btnColors")) || Array(8).fill('#00FF00');
+        let btnModes = JSON.parse(localStorage.getItem("btnModes")) || Array(8).fill('toggle');
+        let btnIcons = JSON.parse(localStorage.getItem("btnIcons")) || Array(8).fill('none');
+        let btnAuth = JSON.parse(localStorage.getItem("btnAuth")) || Array(8).fill(false);
+        let authCredentialId = localStorage.getItem("authCredentialId");
+        
+        let rxConfigs = JSON.parse(localStorage.getItem("rxConfigs")) || Array.from({length:7}, (_,i)=>({id:"90", idx:"2", mode:"1", mul:1.0, add:0, dec:0, label:`Mon ${i+1}`, color:"#FFD700"}));
+        
+        let device, rxChar, txChar, btnStates = Array(8).fill(false), isListening = false, cfgSound = true, cfgVibe = true, currentRxSlot = 0;
+        let canIdVal = localStorage.getItem("canIdVal") || "100", tempWarnVal = 950, tempColor = "#00FFFF";
+
+        document.addEventListener("DOMContentLoaded", () => {
+            renderConfigList(); renderKeypadGrid(); updateLabelsOnMeterView();
+            document.getElementById("can-id-input").value = canIdVal;
+            if(authCredentialId) { document.getElementById("bio-status").textContent = "✅ Registered"; document.getElementById("btn-bio-clear").style.display = "block"; }
+        });
+
+        /* --- BIOMETRIC CORE --- */
+        async function registerBiometric() {
+            try {
+                const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
+                const publicKey = { challenge, rp: { name: "M5 Keypad", id: window.location.hostname }, user: { id: new Uint8Array(16), name: "user", displayName: "User" }, pubKeyCredParams: [{ alg: -7, type: "public-key" }], authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" }, timeout: 60000 };
+                const cred = await navigator.credentials.create({ publicKey });
+                authCredentialId = btoa(String.fromCharCode(...new Uint8Array(cred.rawId))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                localStorage.setItem("authCredentialId", authCredentialId);
+                location.reload();
+            } catch (e) { alert("Registration failed: " + e); }
+        }
+        function clearBiometric() { if(confirm("Clear fingerprint?")) { localStorage.removeItem("authCredentialId"); location.reload(); } }
+        async function checkAuth() {
+            if(!authCredentialId) return true;
+            try {
+                const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
+                const id = new Uint8Array([...atob(authCredentialId.replace(/-/g, '+').replace(/_/g, '/'))].map(c => c.charCodeAt(0)));
+                const assertion = await navigator.credentials.get({ publicKey: { challenge, allowCredentials: [{ id, type: 'public-key' }], userVerification: "required" } });
+                return !!assertion;
+            } catch (e) { return false; }
+        }
+
+        /* --- SETTINGS UI --- */
+        function renderConfigList() {
+            const container = document.getElementById('config-list-container');
+            container.innerHTML = '';
+            btnLabels.forEach((label, i) => {
+                const row = document.createElement('div'); row.className = 'config-row';
+                row.innerHTML = `
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+                        <button class="mini-opt" style="border:1px solid #555; width:30px; height:30px;" onclick="openIconPicker(${i})">${btnIcons[i]!=='none'?ICONS[btnIcons[i]]:'Icon'}</button>
+                        <input type="color" value="${btnColors[i]}" onchange="updateColor(${i}, this.value)" style="width:30px; height:20px; border:none; background:none;">
+                    </div>
+                    <input type="text" value="${label}" style="width:80px;" onchange="updateLabel(${i}, this.value)">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div style="font-size:0.6rem; display:flex; align-items:center;">ON:0x<input type="text" value="${btnOnVals[i]}" style="width:35px; padding:2px;" onchange="updateHex(${i},'on',this.value)"></div>
+                        <div style="font-size:0.6rem; display:flex; align-items:center;">OFF:0x<input type="text" value="${btnOffVals[i]}" style="width:35px; padding:2px;" onchange="updateHex(${i},'off',this.value)"></div>
+                    </div>
+                    <div class="mini-switch">
+                        <button class="mini-opt ${btnModes[i]==='toggle'?'selected':''}" onclick="updateMode(${i},'toggle')">Tog</button>
+                        <button class="mini-opt ${btnModes[i]==='momentary'?'selected':''}" onclick="updateMode(${i},'momentary')">Pul</button>
+                    </div>
+                    <button class="mini-opt ${btnAuth[i]?'selected':''}" style="font-size:1.2rem;" onclick="toggleAuth(${i})">${btnAuth[i]?'🔒':'🔓'}</button>
+                    <button class="btn-orange" style="padding:5px 10px; font-size:0.7rem;" onclick="saveBtn(${i})">SET</button>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        /* --- LOGIC --- */
+        async function handleDown(n) {
+            const idx = n - 1; if(btnAuth[idx]) { const ok = await checkAuth(); if(!ok) return; }
+            if(cfgVibe && navigator.vibrate) navigator.vibrate(15);
+            const target = !btnStates[idx];
+            if(btnModes[idx]==='momentary') { send(n, true); setTimeout(()=>send(n, false), 150); } else { send(n, target); }
+        }
+        function send(n, state) {
+            btnStates[n-1] = state; updateVisual(n, state);
+            if(rxChar) {
+                const val = parseInt(state ? btnOnVals[n-1] : btnOffVals[n-1], 16);
+                rxChar.writeValue(new TextEncoder().encode(`${n}=${val}`)).catch(()=>{});
+            }
+        }
+        function updateVisual(n, act) { const b = document.getElementById('btn-'+n); if(b) act?b.classList.add('active'):b.classList.remove('active'); }
+        
+        function updateHex(i, type, val) { if(type==='on') btnOnVals[i]=val; else btnOffVals[i]=val; localStorage.setItem("btnOnVals", JSON.stringify(btnOnVals)); localStorage.setItem("btnOffVals", JSON.stringify(btnOffVals)); }
+        function updateLabel(i, v) { btnLabels[i]=v; localStorage.setItem("btnLabels", JSON.stringify(btnLabels)); renderKeypadGrid(); }
+        function updateColor(i, v) { btnColors[i]=v; localStorage.setItem("btnColors", JSON.stringify(btnColors)); renderKeypadGrid(); }
+        function updateMode(i, m) { btnModes[i]=m; localStorage.setItem("btnModes", JSON.stringify(btnModes)); renderConfigList(); }
+        function toggleAuth(i) { btnAuth[i]=!btnAuth[i]; localStorage.setItem("btnAuth", JSON.stringify(btnAuth)); renderConfigList(); }
+        function saveBtn(i) { if(rxChar) rxChar.writeValue(new TextEncoder().encode(`CFGBTN=${i},${parseInt(btnOnVals[i],16)},${parseInt(btnOffVals[i],16)}`)); alert("Saved to device"); }
+        function setCanId() { canIdVal=document.getElementById("can-id-input").value; localStorage.setItem("canIdVal", canIdVal); if(rxChar) rxChar.writeValue(new TextEncoder().encode("ID="+canIdVal)); }
+
+        /* --- MULTI-METER LOGIC --- */
+        function loadRxSlotFromUI() {
+            currentRxSlot = parseInt(document.getElementById("rx-slot-select").value);
+            const cfg = rxConfigs[currentRxSlot];
+            document.getElementById("rx-monitor-id-input").value = cfg.id; document.getElementById("rx-byte-index-input").value = cfg.idx;
+            document.getElementById("rx-mode-select").value = cfg.mode; document.getElementById("rx-mul-input").value = cfg.mul;
+            document.getElementById("rx-add-input").value = cfg.add; document.getElementById("rx-label-input").value = cfg.label;
+            document.getElementById("rx-color-input").value = cfg.color;
+        }
+        function setRxConfig() {
+            const cfg = rxConfigs[currentRxSlot];
+            cfg.id = document.getElementById("rx-monitor-id-input").value; cfg.idx = document.getElementById("rx-byte-index-input").value;
+            cfg.mode = document.getElementById("rx-mode-select").value; cfg.mul = parseFloat(document.getElementById("rx-mul-input").value);
+            cfg.add = parseFloat(document.getElementById("rx-add-input").value); cfg.label = document.getElementById("rx-label-input").value;
+            cfg.color = document.getElementById("rx-color-input").value;
+            localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs)); updateLabelsOnMeterView();
+            if(rxChar) rxChar.writeValue(new TextEncoder().encode(`SET_RX=${currentRxSlot},${parseInt(cfg.id,16)},${cfg.idx},${cfg.mode}`)).catch(()=>{});
+        }
+        function updateLabelsOnMeterView() { for(let i=0; i<7; i++) { const el=document.getElementById(`meter-label-${i+2}`); if(el) el.textContent=rxConfigs[i].label; } }
+
+        /* --- BLE & CORE --- */
+        async function handleStartConnect() {
+            try {
+                device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'M5' }], optionalServices: [SERVICE_UUID] });
+                const server = await device.gatt.connect();
+                const svc = await server.getPrimaryService(SERVICE_UUID);
+                rxChar = await svc.getCharacteristic(RX_UUID);
+                txChar = await svc.getCharacteristic(TX_UUID);
+                await txChar.startNotifications();
+                txChar.addEventListener('characteristicvaluechanged', (e) => {
+                    const cmd = new TextDecoder().decode(e.target.value).trim();
+                    if(cmd.startsWith("VAL")) {
+                        const parts = cmd.split('='); const slot = cmd.startsWith("VAL=") ? 0 : parseInt(parts[0].replace("VAL",""))-1;
+                        const cfg = rxConfigs[slot]; const raw = parseInt(parts[1]);
+                        const val = (raw * cfg.mul) + cfg.add; const el = document.getElementById(`meter-val-${slot+2}`);
+                        if(el) { el.textContent = val.toFixed(1); el.style.color = cfg.color; }
+                    } else if(cmd.startsWith("TEMP=")) {
+                        const v = cmd.split("=")[1]; document.getElementById("meter-val-1").textContent = v;
+                    }
+                });
+                document.getElementById("status-display").textContent = "🟢 Connected";
+                document.getElementById("connect-overlay").style.display = "none";
+                document.getElementById("keypad").classList.add("visible");
+            } catch(e) { console.log(e); }
+        }
+
+        function showMain() { document.querySelectorAll('.view-container').forEach(v=>v.classList.remove('active')); document.getElementById('view-main').classList.add('active'); }
+        function showMeter() { document.querySelectorAll('.view-container').forEach(v=>v.classList.remove('active')); document.getElementById('view-meter').classList.add('active'); }
+        function showSettings() { document.querySelectorAll('.view-container').forEach(v=>v.classList.remove('active')); document.getElementById('view-settings').classList.add('active'); }
+        function renderKeypadGrid() {
+            const container = document.getElementById("keypad"); container.innerHTML = "";
+            for (let i = 1; i <= 8; i++) {
+                const b = document.createElement("div"); b.id = `btn-${i}`; b.className = "key-btn";
+                b.style.setProperty('--btn-color', btnColors[i-1]);
+                b.innerHTML = btnIcons[i-1]!=='none'?`${ICONS[btnIcons[i-1]]}<span style="font-size:0.8rem;">${btnLabels[i-1]}</span>`:`<span>${btnLabels[i-1]}</span>`;
+                b.onpointerdown = () => handleDown(i);
+                container.appendChild(b);
+            }
+        }
+        function openIconPicker(i) { 
+            const grid = document.getElementById('icon-picker-grid'); grid.innerHTML = '';
+            Object.keys(ICONS).forEach(k => {
+                const btn = document.createElement('button'); btn.innerHTML = ICONS[k] || 'None';
+                btn.onclick = () => { btnIcons[i]=k; localStorage.setItem("btnIcons", JSON.stringify(btnIcons)); closeIconPicker(); renderConfigList(); renderKeypadGrid(); };
+                grid.appendChild(btn);
+            });
+            document.getElementById('icon-picker-overlay').style.display = 'flex';
+        }
+        function closeIconPicker() { document.getElementById('icon-picker-overlay').style.display = 'none'; }
+    </script>
+</body>
+</html>
