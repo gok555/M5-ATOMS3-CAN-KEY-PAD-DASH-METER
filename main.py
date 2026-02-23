@@ -1,4 +1,3 @@
-
 import M5
 from M5 import *
 import time
@@ -8,20 +7,16 @@ import bluetooth
 import struct
 from micropython import const
 from esp32 import NVS
-
 # ==========================================
 # ATOM S3 + ATOM CAN Base (Full BLE Ver)
-# Ver 3.8: Multi-Monitor Support (7 Slots)
+# Ver 3.85: BLE TX Smoothing & CAN RX Optimize
 # ==========================================
-
 # --- Configuration for ATOM CAN Base ---
 TX_PIN = 6
 RX_PIN = 5
 # ---------------------------------------
-
 can_tx_id = 0x100
 k_meter_id = 0x200
-
 # --- Generic Monitor Config (Array for 7 Slots) ---
 # Each slot: [id, idx, mode]
 # Slot 0 is the "Main" monitor (Backward compatible)
@@ -34,12 +29,7 @@ rx_monitors = [
     [0x90, 2, 1], # Slot 5
     [0x90, 2, 1]  # Slot 6
 ]
-
-# --- Deferred Config Request (Tuples) ---
-rx_config_req = None  # (slot, id, idx, mode)
-
 nvs = None
-
 def init_nvs():
     global nvs, can_tx_id, k_meter_id, rx_monitors
     try:
@@ -53,14 +43,13 @@ def init_nvs():
             nvs = None
             print("NVS Init Failed")
             
-    print(">>> FIRMWARE UPDATED: VER 3.8 (MULTI-MONITOR) <<<")
+    print(">>> FIRMWARE UPDATED: VER 3.82 (NVS FIX) <<<")
     
     if nvs:
         try:
             can_tx_id = nvs.get_i32("my_id")
             print("Loaded ID:", hex(can_tx_id))
         except OSError: pass
-
         try:
             k_meter_id = nvs.get_i32("k_meter_id")
             print("Loaded KID:", hex(k_meter_id))
@@ -74,7 +63,6 @@ def init_nvs():
             rx_monitors[0][2] = nvs.get_i32("rx_m")
             print("Loaded Slot 0 (Legacy):", hex(rx_monitors[0][0]))
         except OSError: pass
-
         # Slot 1-6: Use new keys (rxN_id, rxN_idx, rxN_m)
         for i in range(1, 7):
             try:
@@ -83,7 +71,6 @@ def init_nvs():
                 rx_monitors[i][2] = nvs.get_i32(f"rx{i}_m")
                 # print(f"Loaded Slot {i}:", hex(rx_monitors[i][0]))
             except OSError: pass
-
 def load_btn_nvs():
     if not nvs: return
     try:
@@ -101,26 +88,28 @@ def load_btn_nvs():
             print("Loaded NVS Btn Config")
     except Exception as e:
         print("NVS Load Err:", e)
-
 DEVICE_NAME = "M5AtomS3_CAN_Base"
 FIFO = 0
 can_state = bytearray(8)
 can_error = False
-
 # --- Global Display Variables ---
 last_rx_id = 0
 last_rx_monitor_val = "---" # Initial Monitor Value (Slot 0)
 last_temp_disp = "0"
 rx_count = 0  
-
+# --- Monitor BLE TX Buffers (For rate limiting) ---
+monitor_tx_vals = [None] * 7
+monitor_last_tx_time = [0] * 7
+MONITOR_TX_INTERVAL = 50 # 50ms limit per slot (up to 20Hz refresh)
+global_monitor_tx_time = 0
+MONITOR_TX_GAP = 10 # 10ms gap between BLE transmissions
+last_sent_slot = 0
 UART_UUID = bluetooth.UUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
 UART_TX   = bluetooth.UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
 UART_RX   = bluetooth.UUID("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
-
 _IRQ_CENTRAL_CONNECT    = const(1)
 _IRQ_CENTRAL_DISCONNECT = const(2)
 _IRQ_GATTS_WRITE        = const(3)
-
 class BLEUART:
     def __init__(self, ble):
         self._ble = ble
@@ -136,15 +125,12 @@ class BLEUART:
         self._rx_cb = None
         self._adv_payload = self._get_adv_payload(DEVICE_NAME)
         self._advertise()
-
     def _get_adv_payload(self, name):
         name_bytes = name.encode()
         return b'\x02\x01\x06' + bytes([len(name_bytes)+1, 0x09]) + name_bytes
-
     def _advertise(self):
         try: self._ble.gap_advertise(100_000, self._adv_payload)
         except: pass
-
     def _irq(self, event, data):
         if event == _IRQ_CENTRAL_CONNECT:
             conn_handle, _, _ = data
@@ -160,12 +146,10 @@ class BLEUART:
             self._advertise()
         elif event == _IRQ_GATTS_WRITE:
             if self._rx_cb: self._rx_cb(self._ble.gatts_read(self._rx))
-
     def send(self, data):
         for conn_handle in self._connections:
             try: self._ble.gatts_notify(conn_handle, self._tx, data)
             except: pass
-
     def send_state_sync(self):
         self.send(("STATE=" + ",".join(str(b) for b in can_state)).encode())
         
@@ -179,10 +163,8 @@ class BLEUART:
         time.sleep(0.05)
         # Send initial RX Monitor Config (Slot 0 only for confirm)
         self.send((f"RXID={hex(rx_monitors[0][0])}").encode())
-
     def on_rx(self, cb):
         self._rx_cb = cb
-
 def detect_baudrate():
     M5.Display.clear()
     M5.Display.setCursor(0, 0)
@@ -233,24 +215,20 @@ def detect_baudrate():
         
     print("Detection Failed, Defaulting to 1000000")
     return 1000000 
-
 def on_ble_rx(data):
-    # ★ FIX: rx_monitors used instead of single vars
-    global can_state, can_tx_id, k_meter_id, rx_monitors, rx_config_req
+    # ★ FIX: remove rx_config_req
+    global can_state, can_tx_id, k_meter_id, rx_monitors
     
     try:
-        # Clean Logs (Removed verbose Hex/Parts)
         cmd = data.decode().strip()
         print("RX:", cmd) 
         
         updated = False
         
-        # --- FIXED LOGIC ORDER (Ver 3.16/3.17) ---
         if cmd == "GETCONFIG":
             uart.send_config()
             
         elif cmd.startswith("CFGBTN="):
-            # Format: CFGBTN=idx,on_val,off_val (Decimal)
             try:
                 parts = cmd.split('=')[1].split(',')
                 if len(parts) == 3:
@@ -259,18 +237,14 @@ def on_ble_rx(data):
                     off_v = int(parts[2])
                     
                     if 0 <= idx < 8:
-                        # 1. Priority: Update RAM immediately
-                        # If current state matches ON value, maintain it (don't reset to OFF)
                         if can_state[idx] == (on_v & 0xFF):
                              pass 
                         else:
-                             # Otherwise, apply the OFF value (default/updated)
                              new_val = off_v & 0xFF
                              if can_state[idx] != new_val:
                                  can_state[idx] = new_val
                                  updated = True
                           
-                        # 2. Try Save to NVS
                         if nvs:
                             try:
                                 nvs.set_i32(f"btn{idx+1}_on", on_v)
@@ -294,11 +268,9 @@ def on_ble_rx(data):
                     if nvs: nvs.set_i32("k_meter_id", new_kid); nvs.commit()
                 except: pass
                 
-            # --- PATCH APPLIED HERE: Multi-Slot Support ---
-            elif parts[0] == "SET_RX": # Handles "SET_RX=slot,id,idx,mode"
+            elif parts[0] == "SET_RX":
                 try:
                     rx_parts = parts[1].split(',')
-                    # Check for 4 parameters (New format)
                     if len(rx_parts) >= 4:
                         new_rx_slot = int(rx_parts[0])
                         new_rx_id   = int(rx_parts[1])
@@ -306,22 +278,31 @@ def on_ble_rx(data):
                         new_rx_mode = int(rx_parts[3])
                         
                         if 0 <= new_rx_slot < 7:
-                            # Update Global Array
                             rx_monitors[new_rx_slot][0] = new_rx_id
                             rx_monitors[new_rx_slot][1] = new_rx_idx
                             rx_monitors[new_rx_slot][2] = new_rx_mode
                             
-                            # Trigger NVS Save in main loop
-                            rx_config_req = (new_rx_slot, new_rx_id, new_rx_idx, new_rx_mode)
+                            # MODIFIED: Commit to NVS immediately like ID and KID
+                            if nvs:
+                                try:
+                                    if new_rx_slot == 0:
+                                        nvs.set_i32("rx_id", new_rx_id)
+                                        nvs.set_i32("rx_idx", new_rx_idx)
+                                        nvs.set_i32("rx_m", new_rx_mode)
+                                    else:
+                                        nvs.set_i32(f"rx{new_rx_slot}_id", new_rx_id)
+                                        nvs.set_i32(f"rx{new_rx_slot}_idx", new_rx_idx)
+                                        nvs.set_i32(f"rx{new_rx_slot}_m", new_rx_mode)
+                                    nvs.commit()
+                                    print(f"NVS Saved Immediately (Slot {new_rx_slot})")
+                                except: pass
                             
-                            # JSへ確認応答 (Slot 0の場合のみRXID=で返す、他は無視でもOK)
                             if new_rx_slot == 0:
                                 try: uart.send(f"RXID={hex(new_rx_id)}".encode())
                                 except: pass
                             
                             print(f"Slot {new_rx_slot} Updated: {hex(new_rx_id)}")
                     
-                    # Backward Compatibility (3 parameters = Slot 0)
                     elif len(rx_parts) == 3:
                         new_rx_id   = int(rx_parts[0])
                         new_rx_idx  = int(rx_parts[1])
@@ -329,16 +310,24 @@ def on_ble_rx(data):
                         rx_monitors[0][0] = new_rx_id
                         rx_monitors[0][1] = new_rx_idx
                         rx_monitors[0][2] = new_rx_mode
-                        rx_config_req = (0, new_rx_id, new_rx_idx, new_rx_mode)
+                        
+                        # MODIFIED: Commit to NVS immediately
+                        if nvs:
+                            try:
+                                nvs.set_i32("rx_id", new_rx_id)
+                                nvs.set_i32("rx_idx", new_rx_idx)
+                                nvs.set_i32("rx_m", new_rx_mode)
+                                nvs.commit()
+                                print(f"NVS Saved Immediately (Slot 0 Legacy)")
+                            except: pass
+                            
                         try: uart.send(f"RXID={hex(new_rx_id)}".encode())
                         except: pass
                         
                 except Exception as e:
                     print("SET_RX Err:", e)
             # --------------------------
-
             elif len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                # Direct idx=val format
                 idx = int(parts[0]) - 1
                 val = int(parts[1])
                 if 0 <= idx < 8:
@@ -358,16 +347,13 @@ def on_ble_rx(data):
             
     except Exception as e:
         print("BLE RX Err:", e)
-
 # ---------------------------------------------
 # Main Setup
 # ---------------------------------------------
 M5.begin()
 init_nvs()
-load_btn_nvs() # Load Initial Values
-
+load_btn_nvs()
 detected_rate = detect_baudrate()
-
 try:
     can = CANUnit(id=0, port=(TX_PIN, RX_PIN), mode=CANUnit.NORMAL, baudrate=detected_rate)
     try:
@@ -383,15 +369,12 @@ try:
     can.send(id=can_tx_id, data=can_state)
 except Exception as e:
     print("CAN Init Err:", e)
-
 ble = bluetooth.BLE()
 uart = BLEUART(ble)
 uart.on_rx(on_ble_rx)
-
 # --- K-Meter Init ---
 kmeter_addr = 0x66
 kmeter_found = False
-
 try:
     i2c0 = I2C(0, scl=Pin(1), sda=Pin(2), freq=100000)
     time.sleep(0.5) 
@@ -400,13 +383,10 @@ try:
         kmeter_found = True
 except Exception as e:
     pass
-
 M5.Display.clear()
 time.sleep(0.5)
-
 last_display_update = 0
 DISPLAY_INTERVAL = 200
-
 def update_lcd():
     M5.Display.setTextSize(2)
     
@@ -438,7 +418,6 @@ def update_lcd():
     M5.Display.setCursor(0, 60)
     M5.Display.setTextColor(0xFFFF, 0x0000) 
     M5.Display.print(f"KID:{k_meter_id:X}     ")
-
     # 5. Temp
     M5.Display.setCursor(0, 80)
     M5.Display.setTextColor(0x07E0, 0x0000)
@@ -449,7 +428,6 @@ def update_lcd():
              M5.Display.print("Temp: NO-I2C    ")
     else:
         M5.Display.print(f"Temp:{last_temp_disp}C    ")
-
     # 6. Baudrate
     M5.Display.setCursor(0, 100)
     if detected_rate >= 1000000:
@@ -458,22 +436,18 @@ def update_lcd():
     else:
         M5.Display.setTextColor(0xFFE0, 0x0000) 
         M5.Display.print("500k      ")
-
     # 7. Generic Monitor (Show Slot 0 only for simplicity)
     M5.Display.setCursor(0, 120)
     M5.Display.setTextColor(0xFFE0, 0x0000)
-    # Use Slot 0 config for display
     M5.Display.print(f"RX:{rx_monitors[0][0]:X} i:{rx_monitors[0][1]} m:{rx_monitors[0][2]}   ")
     M5.Display.setCursor(0, 140)
     M5.Display.print(f"Val:{last_rx_monitor_val}       ")
-
 last_can_send_time = 0
-CAN_SEND_INTERVAL = 200  
+CAN_SEND_INTERVAL = 100  # 10Hz for Keypad TX
 last_ble_sync_time = 0
 BLE_SYNC_INTERVAL = 1000 
 last_temp_send_time = 100 
 TEMP_SEND_INTERVAL = 200 
-
 while True:
     M5.update()
     now = time.ticks_ms()
@@ -484,7 +458,6 @@ while True:
             can.send(id=0x200, data=test_data)
         except:
             pass
-
     # --- Temp/TX Loop ---
     if time.ticks_diff(now, last_temp_send_time) > TEMP_SEND_INTERVAL:
         if kmeter_found:
@@ -506,7 +479,6 @@ while True:
                 except: pass
             except: pass
         last_temp_send_time = now
-
     if time.ticks_diff(now, last_can_send_time) > CAN_SEND_INTERVAL:
         try:
             can.send(id=can_tx_id, data=can_state)
@@ -514,37 +486,12 @@ while True:
         except:
             can_error = True
         last_can_send_time = now
-
     if time.ticks_diff(now, last_ble_sync_time) > BLE_SYNC_INTERVAL:
         uart.send_state_sync()
         uart.send_status(can_error)
         last_ble_sync_time = now
-
-    # --- Process Deferred RX Config (NVS Save) ---
-    if rx_config_req:
-        try:
-            (req_slot, req_id, req_idx, req_mode) = rx_config_req
-            # Global vars are already updated in on_ble_rx
-            rx_config_req = None # Clear request
-            
-            if nvs:
-                try:
-                    if req_slot == 0:
-                        nvs.set_i32("rx_id", req_id)
-                        nvs.set_i32("rx_idx", req_idx)
-                        nvs.set_i32("rx_m", req_mode)
-                    else:
-                        nvs.set_i32(f"rx{req_slot}_id", req_id)
-                        nvs.set_i32(f"rx{req_slot}_idx", req_idx)
-                        nvs.set_i32(f"rx{req_slot}_m", req_mode)
-                        
-                    nvs.commit()
-                    print(f"NVS Saved (Slot {req_slot})")
-                except: pass
-        except Exception as e:
-            print("Config Apply Err:", e)
-            rx_config_req = None
-
+    # MODIFIED: Removed deferred RX Config (NVS Save) logic from here
+    
     # --- RX Loop (Multi-Monitor) ---
     if can and can.any(FIFO):
         try:
@@ -590,21 +537,32 @@ while True:
                             if slot_i == 0:
                                 last_rx_monitor_val = str(val)
                             
-                            # Send to BLE
-                            # Slot 0 -> "VAL=..."
-                            # Slot 1-6 -> "VAL2=...", "VAL3=..." etc.
                             try: 
-                                prefix = "VAL" if slot_i == 0 else f"VAL{slot_i+1}"
-                                uart.send(f"{prefix}={val}".encode())
+                                # All Slots (0-6) are buffered to prevent Bluetooth flooding
+                                monitor_tx_vals[slot_i] = val
                             except: pass
                             
                         except Exception as e:
                             pass
-                        # Note: Do not 'break' here, as multiple slots might monitor the same ID (e.g. Byte 0 and Byte 2)
       
         except:
             pass
-
+    # --- Throttle BLE TX for RX Monitors (Slot 0-6) ---
+    # Sequentially send data with a gap to prevent BLE saturation
+    if time.ticks_diff(now, global_monitor_tx_time) > MONITOR_TX_GAP:
+        for offset in range(1, 8):
+            i = (last_sent_slot + offset) % 7
+            if monitor_tx_vals[i] is not None:
+                if time.ticks_diff(now, monitor_last_tx_time[i]) > MONITOR_TX_INTERVAL:
+                    try:
+                        prefix = "VAL" if i == 0 else f"VAL{i+1}"
+                        uart.send(f"{prefix}={monitor_tx_vals[i]}".encode())
+                        monitor_last_tx_time[i] = now
+                        monitor_tx_vals[i] = None
+                        global_monitor_tx_time = now
+                        last_sent_slot = i
+                        break # Only send one per gap
+                    except: pass
     # --- LCD Update ---
     if time.ticks_diff(now, last_display_update) > DISPLAY_INTERVAL:
         update_lcd()
