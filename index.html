@@ -968,6 +968,7 @@
                         const onVal = parseInt(btnOnVals[i], 16); btnStates[i] = (receivedVal === onVal); updateBtnVisual(i + 1, btnStates[i]);
                     }
                 }
+            }
             else if (cleanedCmd.startsWith("STATUS=")) { const st = cleanedCmd.substring(7); updateCanStatus(st); }
         }
         function updateBtnVisual(n, isActive) { const btn = document.getElementById('btn-' + n); if (!btn) return; if (isActive) { btn.classList.add('active'); } else { btn.classList.remove('active'); } }
