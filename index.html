@@ -723,6 +723,12 @@
                 await new Promise(r => setTimeout(r, 150)); 
             }
             if (overlay) overlay.style.display = "none"; log("Config Sync Complete");
+            // ★ syncAllBtnConfigs完了後にSTATE=を再要求してボタン表示を正しく復元
+            await new Promise(r => setTimeout(r, 300));
+            if (rxChar) {
+                rxChar.writeValue(new TextEncoder().encode("REQUEST_STATE")).catch(()=>{});
+                log("Requested STATE refresh");
+            }
         }
         function saveBtnConfig(index) { sendBtnConfig(index); alert(`Button ${index + 1} のON/OFF設定をデバイスに保存しました。`); }
         function sendBtnConfig(inIdx) {
@@ -1037,21 +1043,13 @@
             dec.textContent = isNaN(v) ? "" : `(${v})`;
         }
         function autoFillGrp2() {
-            // GRP1入力時にGRP2を自動計算して入力
-            // ルール: GRP1が偶数 → GRP2=GRP1+1
-            //         GRP1が奇数 → GRP1を偶数に繰り上げてGRP2=GRP1+1
             const g1el = document.getElementById("grp1-id-input");
             const g2el = document.getElementById("grp2-id-input");
             if (!g1el || !g2el) return;
             const v = parseInt(g1el.value, 16);
             if (isNaN(v)) return;
-            // GRP1が奇数なら偶数に繰り上げ
             const base = (v % 2 === 0) ? v : v + 1;
-            if (base !== v) {
-                g1el.value = base.toString(16).toUpperCase();
-                updateGrpDec('grp1');
-            }
-            // GRP2 = base + 1
+            if (base !== v) { g1el.value = base.toString(16).toUpperCase(); updateGrpDec('grp1'); }
             g2el.value = (base + 1).toString(16).toUpperCase();
             updateGrpDec('grp2');
         }
