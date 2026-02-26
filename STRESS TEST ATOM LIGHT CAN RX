@@ -1,1 +1,153 @@
+# ==========================================
+# ATOM Lite + Grove CAN Unit (U085)
+# 負荷テスト v3.1 - 全スロット可変アニメーション
+# ==========================================
+# 0x4E0/4E1 の全8バイトに異なる波形データを入れ
+# ダッシュメータの全7スロットが動くように変更
+#
+# スロット割当:
+#   0x4E0 byte0-1: slot0 (RPM相当)
+#   0x4E0 byte2-3: slot1 (マニホールド圧相当)
+#   0x4E0 byte4-5: slot2 (吸気温度相当)
+#   0x4E0 byte6-7: slot3 (インジェクターDUTY相当)
+#   0x4E1 byte0-1: slot4 (空燃比相当)
+#   0x4E1 byte2-3: slot5 (油圧相当)
+#   0x4E1 byte4-5: slot6 (その他)
+#
+# BtnA: ノイズON(赤) / OFF(緑) 切替
+# ==========================================
+import os, sys, time, random, math
+import M5
+from M5 import *
+from unit import CANUnit
+
+TX_PIN   = 32
+RX_PIN   = 26
+BAUD_RATE = 1000000
+
+can      = None
+tick     = 0        # 0〜399 でループ (波形周期)
+noise_on = True
+
+try:
+    from hardware import RGB
+    HAS_RGB = True
+except ImportError:
+    HAS_RGB = False
+rgb = None
+
+def setup_led():
+    global rgb
+    if HAS_RGB:
+        try: rgb = RGB(); rgb.set_color(0, 0xFF0000)
+        except: rgb = None
+
+def set_led(c):
+    if rgb:
+        try: rgb.set_color(0, c)
+        except: pass
+
+def setup():
+    global can
+    M5.begin()
+    setup_led()
+    print("\n==================================")
+    print(" CAN Stress Test v3.1")
+    print(" 全スロット可変アニメーション")
+    print(" BtnA: ノイズON(赤) / OFF(緑)")
+    print("==================================\n")
+    try:
+        can = CANUnit(id=0, port=(TX_PIN, RX_PIN),
+                      mode=CANUnit.NORMAL, baudrate=BAUD_RATE)
+        print("CAN Init OK")
+    except Exception as e:
+        print("CAN Init Failed:", e)
+        while True: set_led(0xFF0000); time.sleep(1)
+
+def pack16le(arr, idx, val):
+    val = int(val) & 0xFFFF
+    arr[idx] = val & 0xFF; arr[idx+1] = (val >> 8) & 0xFF
+
+def safe_send(sid, data):
+    try: can.send(id=sid, data=data)
+    except: pass
+
+# 送信タイマー
+t_4E0 = t_4E1 = t_4E8 = t_4F0 = t_4F8 = 0
+t_7FA = t_7F8 = t_7F9 = t_7FB = t_rand = 0
+
+def wave(tick, period, amp, offset):
+    """正弦波: 振幅amp、オフセットoffset、周期period(tick単位)"""
+    return int(offset + amp * math.sin(2 * math.pi * tick / period))
+
+def loop():
+    global tick, noise_on
+    global t_4E0, t_4E1, t_4E8, t_4F0, t_4F8
+    global t_7FA, t_7F8, t_7F9, t_7FB, t_rand
+
+    M5.update()
+    now = time.ticks_ms()
+
+    # ===== ボタン =====
+    if BtnA.wasPressed():
+        noise_on = not noise_on
+        if noise_on:
+            set_led(0xFF0000); print("NOISE: ON  (赤)")
+        else:
+            set_led(0x00FF00); print("NOISE: OFF (緑)")
+
+    # ===== 0x4E0  20Hz (50ms) 全4スロット可変 =====
+    if time.ticks_diff(now, t_4E0) >= 50:
+        d = bytearray(8)
+        # slot0: RPM 1000〜7000 (周期200tick)
+        pack16le(d, 0, wave(tick, 200, 3000, 4000))
+        # slot1: マニホールド圧 500〜2500 (周期150tick 位相ずれ)
+        pack16le(d, 2, wave(tick + 50, 150, 1000, 1500))
+        # slot2: 吸気温度 200〜500 (周期300tick ゆっくり)
+        pack16le(d, 4, wave(tick, 300, 150, 350))
+        # slot3: インジェクターDUTY 2000〜8000 (周期180tick)
+        pack16le(d, 6, wave(tick + 90, 180, 3000, 5000))
+        safe_send(0x4E0, d)
+        t_4E0 = now
+
+    # ===== 0x4E1  20Hz (50ms) 全3スロット可変 =====
+    if time.ticks_diff(now, t_4E1) >= 50:
+        d = bytearray(8)
+        # slot4: 空燃比 1200〜1700 (AFR×100 周期120tick)
+        pack16le(d, 0, wave(tick + 30, 120, 250, 1450))
+        # slot5: 油圧 200〜600 (周期250tick)
+        pack16le(d, 2, wave(tick + 70, 250, 200, 400))
+        # slot6: その他 1000〜3000 (周期160tick)
+        pack16le(d, 4, wave(tick + 110, 160, 1000, 2000))
+        safe_send(0x4E1, d)
+        t_4E1 = now
+        tick = (tick + 1) % 400   # tickは4E1更新時にインクリメント
+
+    # ===== ノイズ =====
+    if noise_on:
+        if time.ticks_diff(now, t_7FA) >= 10:
+            safe_send(0x7FA, bytearray([0xAA,0xBB,0xCC,0xDD,0,0,0,0])); t_7FA = now
+        if time.ticks_diff(now, t_7F8) >= 17:
+            safe_send(0x7F8, bytearray([0x11,0x22,0x33,0x44,0,0,0,0])); t_7F8 = now
+        if time.ticks_diff(now, t_7F9) >= 25:
+            safe_send(0x7F9, bytearray([0x55,0x66,0x77,0x88,0,0,0,0])); t_7F9 = now
+        if time.ticks_diff(now, t_7FB) >= 100:
+            safe_send(0x7FB, bytearray([0x99,0xAA,0xBB,0xCC,0,0,0,0])); t_7FB = now
+        if time.ticks_diff(now, t_4E8) >= 100:
+            d = bytearray(8); pack16le(d,4,random.randint(500,600)); pack16le(d,6,random.randint(500,580))
+            safe_send(0x4E8, d); t_4E8 = now
+        if time.ticks_diff(now, t_4F0) >= 100:
+            safe_send(0x4F0, bytearray([random.randint(0,255)]*8)); t_4F0 = now
+        if time.ticks_diff(now, t_4F8) >= 100:
+            safe_send(0x4F8, bytearray([random.randint(0,255)]*8)); t_4F8 = now
+        if time.ticks_diff(now, t_rand) >= 20:
+            rand_id = random.choice([random.randint(0x100,0x4DF), random.randint(0x500,0x59F),
+                                     random.randint(0x5A1,0x660), random.randint(0x662,0x7EF)])
+            safe_send(rand_id, bytearray([0xDD,0xEE,0xAA,0xDD,0,0,0,0])); t_rand = now
+
+if __name__ == '__main__':
+    setup()
+    while True:
+        try: loop()
+        except Exception as e: print("Error:", e)
 
