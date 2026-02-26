@@ -328,7 +328,7 @@
                         <div class="id-input-group" style="border:1px solid #0af;">
                             <label style="min-width:65px; color:#0af; font-size:0.85rem;">Grp1: 0x</label>
                             <input type="text" id="grp1-id-input" maxlength="3"
-                                oninput="updateGrpDec('grp1')"
+                                oninput="updateGrpDec('grp1'); autoFillGrp2();"
                                 style="flex:1; background:#222; border:1px solid #555; color:#0af; padding:6px; border-radius:4px; text-align:center; font-family:monospace; font-size:1rem; font-weight:bold;">
                             <span id="grp1-dec-display" style="font-size:0.7rem; color:#666; padding-right:6px; min-width:45px; text-align:right;"></span>
                         </div>
@@ -874,7 +874,7 @@
                 }
                 
                 if (isAlarm) {
-                    el.style.color = "#FFF"; setTimeout(() => el.style.color = "#FF0000", 100);
+                    el.style.color = "#FF0000";
                     el.classList.add("temp-warning");
                     el.classList.remove("val-yellow"); el.classList.remove("val-gray"); el.classList.add("val-red");
                     
@@ -883,7 +883,7 @@
                         lastRxWarnTimes[cfgSlotIdx] = Date.now();
                     }
                 } else {
-                    el.style.color = "#FFF"; setTimeout(() => el.style.color = cfg.color, 100);
+                    el.style.color = cfg.color;
                     el.classList.remove("temp-warning"); el.classList.remove("val-red"); el.classList.remove("val-gray");
                     el.style.textShadow = `0 0 10px ${cfg.color}66`;
                 }
@@ -919,14 +919,13 @@
             }
             
             // --- VALS: 全スロット一括受信 (V7.7) ---
-            // VALS=v0,v1,v2,v3,v4,v5,v6 形式。未更新スロットは空文字
             else if (cleanedCmd.startsWith("VALS=")) {
                 const parts = cleanedCmd.substring(5).split(",");
                 for (let i = 0; i < 7 && i < parts.length; i++) {
                     if (parts[i] === "") continue;
                     const raw = parseInt(parts[i]);
                     if (isNaN(raw)) continue;
-                    const mIdx = i + 2; // slot0→meter-val-2, slot6→meter-val-8
+                    const mIdx = i + 2;
                     const res = updateMeterValue(`meter-val-${mIdx}`, `meter-unit-${mIdx}`, raw, i);
                     if (currentRxSlot === i) {
                         document.getElementById("rx-live-val").textContent = res.disp;
@@ -1036,6 +1035,25 @@
             if (!el || !dec) return;
             const v = parseInt(el.value, 16);
             dec.textContent = isNaN(v) ? "" : `(${v})`;
+        }
+        function autoFillGrp2() {
+            // GRP1入力時にGRP2を自動計算して入力
+            // ルール: GRP1が偶数 → GRP2=GRP1+1
+            //         GRP1が奇数 → GRP1を偶数に繰り上げてGRP2=GRP1+1
+            const g1el = document.getElementById("grp1-id-input");
+            const g2el = document.getElementById("grp2-id-input");
+            if (!g1el || !g2el) return;
+            const v = parseInt(g1el.value, 16);
+            if (isNaN(v)) return;
+            // GRP1が奇数なら偶数に繰り上げ
+            const base = (v % 2 === 0) ? v : v + 1;
+            if (base !== v) {
+                g1el.value = base.toString(16).toUpperCase();
+                updateGrpDec('grp1');
+            }
+            // GRP2 = base + 1
+            g2el.value = (base + 1).toString(16).toUpperCase();
+            updateGrpDec('grp2');
         }
         function setGroups() {
             const g1 = document.getElementById("grp1-id-input").value.trim();
