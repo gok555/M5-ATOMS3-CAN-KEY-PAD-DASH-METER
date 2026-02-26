@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>M5Atom CAN Keypad (v3.81 Voice Fix)</title>
+    <title>M5Atom CAN Keypad (v4.0 Group ID)</title>
     <style>
         /* Reset & Base */
         html, body {
@@ -254,7 +254,7 @@
         </div>
         <div id="connect-overlay">
             <button id="start-btn" onclick="handleStartConnect()">CONNECT<br>START</button>
-            <div style="margin-top:20px; color:#666; font-size:0.8rem;">Ver 3.81 (Voice Fix)</div>
+            <div style="margin-top:20px; color:#666; font-size:0.8rem;">Ver 4.0 (Group ID)</div>
         </div>
         <div id="sync-overlay">⚙️ Syncing...</div>
         <div id="keypad"></div>
@@ -317,17 +317,44 @@
             </div>
             
             <div class="control-row" style="margin-top: 10px; border-top: 1px solid #444; padding-top: 5px;">
+
+                <!-- ★ グループID設定エリア (v4.0追加) -->
+                <div style="background:#1a2a3a; border:1px solid #0af; border-radius:8px; padding:10px; margin-bottom:12px;">
+                    <div style="color:#0af; font-size:0.9rem; font-weight:bold; margin-bottom:6px;">📡 受信グループID設定</div>
+                    <div style="font-size:0.7rem; color:#888; margin-bottom:8px;">
+                        Group1 → Monitor1〜4 &nbsp;|&nbsp; Group2 → Monitor5〜7
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <div class="id-input-group" style="border:1px solid #0af;">
+                            <label style="min-width:65px; color:#0af; font-size:0.85rem;">Grp1: 0x</label>
+                            <input type="text" id="grp1-id-input" maxlength="3"
+                                oninput="updateGrpDec('grp1')"
+                                style="flex:1; background:#222; border:1px solid #555; color:#0af; padding:6px; border-radius:4px; text-align:center; font-family:monospace; font-size:1rem; font-weight:bold;">
+                            <span id="grp1-dec-display" style="font-size:0.7rem; color:#666; padding-right:6px; min-width:45px; text-align:right;"></span>
+                        </div>
+                        <div class="id-input-group" style="border:1px solid #fa0;">
+                            <label style="min-width:65px; color:#fa0; font-size:0.85rem;">Grp2: 0x</label>
+                            <input type="text" id="grp2-id-input" maxlength="3"
+                                oninput="updateGrpDec('grp2')"
+                                style="flex:1; background:#222; border:1px solid #555; color:#fa0; padding:6px; border-radius:4px; text-align:center; font-family:monospace; font-size:1rem; font-weight:bold;">
+                            <span id="grp2-dec-display" style="font-size:0.7rem; color:#666; padding-right:6px; min-width:45px; text-align:right;"></span>
+                        </div>
+                        <button class="action-btn btn-blue" onclick="setGroups()" style="padding:10px; font-size:0.9rem;">📡 SET & SAVE Groups</button>
+                        <div id="grp-status" style="font-size:0.75rem; color:#888; text-align:right;"></div>
+                    </div>
+                </div>
+
                 <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">📡 RX Monitor Config</div>
                 
                 <div style="display:flex; gap:5px; margin-bottom:10px;">
                      <select id="rx-slot-select" onchange="loadRxSlotFromUI()" style="width:100%; background:#005cbf; font-weight:bold; font-size:1.1rem; padding:10px;">
-                         <option value="0">Monitor 1 (VAL)</option>
-                         <option value="1">Monitor 2 (VAL2)</option>
-                         <option value="2">Monitor 3 (VAL3)</option>
-                         <option value="3">Monitor 4 (VAL4)</option>
-                         <option value="4">Monitor 5 (VAL5)</option>
-                         <option value="5">Monitor 6 (VAL6)</option>
-                         <option value="6">Monitor 7 (VAL7)</option>
+                         <option value="0">Monitor 1 (VAL) ← Grp1 Byte0-1</option>
+                         <option value="1">Monitor 2 (VAL2) ← Grp1 Byte2-3</option>
+                         <option value="2">Monitor 3 (VAL3) ← Grp1 Byte4-5</option>
+                         <option value="3">Monitor 4 (VAL4) ← Grp1 Byte6-7</option>
+                         <option value="4">Monitor 5 (VAL5) ← Grp2 Byte0-1</option>
+                         <option value="5">Monitor 6 (VAL6) ← Grp2 Byte2-3</option>
+                         <option value="6">Monitor 7 (VAL7) ← Grp2 Byte4-5</option>
                      </select>
                 </div>
 
@@ -340,16 +367,10 @@
                         <input type="text" id="rx-label-input" value="RX Monitor" maxlength="12" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-size:0.8rem;">
                     </div>
                 </div>
+                <!-- ★ ID / Index 行を削除 → Mode のみ残す -->
                 <div style="display:flex; gap:2px; margin-bottom:4px;">
-                    <div class="id-input-group" style="flex:0.7; padding: 1px; gap: 1px;">
-                        <label style="min-width:18px; font-size:0.75rem; color:#e67e22; padding-left:2px;">ID</label>
-                        <input type="text" id="rx-monitor-id-input" value="90" maxlength="3" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
-                    </div>
                     <div class="id-input-group" style="flex:1; padding: 1px; gap: 1px;">
-                        <label style="min-width:18px; font-size:0.75rem; padding-left:2px;">Idx</label>
-                        <input type="number" id="rx-byte-index-input" value="2" min="0" max="7" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; text-align:center; font-family:monospace; font-size:0.75rem;">
-                    </div>
-                    <div class="id-input-group" style="flex:1.5; padding: 1px; gap: 1px;">
+                        <label style="min-width:40px; font-size:0.75rem; padding-left:2px;">Mode</label>
                         <select id="rx-mode-select" style="flex:1; background:#222; border:1px solid #555; color:white; padding:4px 0; border-radius:4px; font-size:0.75rem;">
                             <option value="0">1B</option>
                             <option value="1" selected>2B-LE</option>
@@ -417,7 +438,7 @@
                 </div>
                 <input type="file" id="import-file" style="display:none" accept=".json" onchange="handleFileSelect(this)">
             </div>
-            <div style="color: #666; font-size: 0.8rem; text-align: center; margin-top: 10px;">Atom S3 Keypad & Dash Meter Ver 3.81 (Final)<br>M5Atom S3 CAN</div>
+            <div style="color: #666; font-size: 0.8rem; text-align: center; margin-top: 10px;">Atom S3 Keypad & Dash Meter Ver 4.0 (Group ID)<br>M5Atom S3 CAN</div>
         </div>
         <pre id="log">Logs...</pre>
     </div>
@@ -480,18 +501,19 @@
         // Slots 0-6 represent Monitors 1-7 (Displayed as VAL, VAL2...VAL7)
         // Default values provided for each slot
         const DEFAULT_RX_CONFIG = {
-            id: "90", idx: "2", mode: "1", mul: 1.0, add: 0, dec: 0, 
+            mode: "1", mul: 1.0, add: 0, dec: 0, 
             unit: "", label: "Monitor", color: "#FFD700", alarmMode: "high", warnVal: null 
         };
         
+        // ★ グループID (v4.0)
+        let grp1IdVal = localStorage.getItem("grp1IdVal") || "4E0";
+        let grp2IdVal = localStorage.getItem("grp2IdVal") || "4E1";
+
         let rxConfigs = JSON.parse(localStorage.getItem("rxConfigs"));
         if (!rxConfigs || !Array.isArray(rxConfigs) || rxConfigs.length < 7) {
-            // Migrate old single values or init new
-            const oldId = localStorage.getItem("rxMonitorId") || "90";
             const oldLbl = localStorage.getItem("rxLabel") || "RX Monitor";
             rxConfigs = Array.from({length: 7}, (_, i) => ({
                 ...DEFAULT_RX_CONFIG, 
-                id: (i===0 ? oldId : "90"), 
                 label: (i===0 ? oldLbl : `Monitor ${i+1}`)
             }));
         }
@@ -512,6 +534,9 @@
         document.addEventListener("DOMContentLoaded", () => {
             const cInput = document.getElementById("can-id-input"); if (cInput) cInput.value = canIdVal;
             const kInput = document.getElementById("k-meter-id-input"); if (kInput) kInput.value = kMeterIdVal;
+            // ★ グループID初期化
+            const g1 = document.getElementById("grp1-id-input"); if (g1) { g1.value = grp1IdVal; updateGrpDec('grp1'); }
+            const g2 = document.getElementById("grp2-id-input"); if (g2) { g2.value = grp2IdVal; updateGrpDec('grp2'); }
             const tInput = document.getElementById("temp-alarm-input");
             if (tInput) {
                 tInput.value = tempWarnVal;
@@ -540,9 +565,7 @@
             currentRxSlot = parseInt(sel.value);
             const cfg = rxConfigs[currentRxSlot];
             
-            document.getElementById("rx-monitor-id-input").value = cfg.id;
-            document.getElementById("rx-byte-index-input").value = cfg.idx;
-            document.getElementById("rx-mode-select").value = cfg.mode;
+            document.getElementById("rx-mode-select").value = cfg.mode || "1";
             document.getElementById("rx-mul-input").value = cfg.mul;
             document.getElementById("rx-add-input").value = cfg.add;
             document.getElementById("rx-dec-select").value = cfg.dec;
@@ -567,16 +590,10 @@
         function setRxConfig() {
             const cfg = rxConfigs[currentRxSlot];
             
-            // UIから値を取得
-            const idVal = document.getElementById("rx-monitor-id-input").value.trim();
-            if (!idVal.match(/^[0-9A-Fa-f]+$/)) { alert("Invalid Hex ID"); return; }
-            
-            cfg.id = idVal;
-            cfg.idx = document.getElementById("rx-byte-index-input").value;
             cfg.mode = document.getElementById("rx-mode-select").value;
-            cfg.mul = parseFloat(document.getElementById("rx-mul-input").value) || 1.0;
-            cfg.add = parseFloat(document.getElementById("rx-add-input").value) || 0;
-            cfg.dec = parseInt(document.getElementById("rx-dec-select").value) || 0;
+            cfg.mul  = parseFloat(document.getElementById("rx-mul-input").value) || 1.0;
+            cfg.add  = parseFloat(document.getElementById("rx-add-input").value) || 0;
+            cfg.dec  = parseInt(document.getElementById("rx-dec-select").value) || 0;
             cfg.unit = document.getElementById("rx-unit-input").value || "";
             cfg.label = document.getElementById("rx-label-input").value || `Monitor ${currentRxSlot+1}`;
             cfg.color = document.getElementById("rx-color-input").value;
@@ -584,29 +601,20 @@
             const wVal = parseFloat(document.getElementById("rx-alarm-input").value);
             cfg.warnVal = isNaN(wVal) ? null : wVal;
 
-            // 保存
             localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs));
             updateLabelsOnMeterView();
             
             const statusEl = document.getElementById("rx-config-status");
-            
-            // --- 全スロットでコマンド送信 (デバイス側V3.8対応) ---
-            let devMode = cfg.mode;
-            if (cfg.mode == 3) devMode = 0; 
-            if (cfg.mode == 4) devMode = 1; 
-            if (cfg.mode == 5) devMode = 2; 
 
-            const idDec = parseInt(cfg.id, 16); 
-            // コマンド形式: SET_RX=slotIndex,canID(dec),byteIndex,mode
-            const cmd = `SET_RX=${currentRxSlot},${idDec},${cfg.idx},${devMode}`; 
-            
-            log("TX Config: " + cmd); 
+            // ★ SET_SLOT_MODE=slot,mode でModeのみ送信
+            const cmd = `SET_SLOT_MODE=${currentRxSlot},${cfg.mode}`;
+            log("TX SlotMode: " + cmd);
 
             if (rxChar) {
                 rxChar.writeValue(new TextEncoder().encode(cmd))
                     .then(() => { 
                         if (statusEl) { 
-                            statusEl.textContent = `📡 Sent Slot ${currentRxSlot+1} Config!`; 
+                            statusEl.textContent = `📡 Sent Slot ${currentRxSlot+1} Mode!`; 
                             statusEl.style.color = "#74c0fc"; 
                         } 
                     })
@@ -889,22 +897,28 @@
             
             if (cleanedCmd.startsWith("ID=")) { const val = cleanedCmd.split("=")[1].replace("0x", "").replace("0X", "").toUpperCase(); log("Sync ID: " + val); canIdVal = val; localStorage.setItem("canIdVal", canIdVal); const el = document.getElementById("can-id-input"); if (el) el.value = canIdVal; }
             else if (cleanedCmd.startsWith("KID=")) { const val = cleanedCmd.split("=")[1].replace("0x", "").replace("0X", "").toUpperCase(); log("Sync KID: " + val); kMeterIdVal = val; localStorage.setItem("kMeterIdVal", kMeterIdVal); const el = document.getElementById("k-meter-id-input"); if (el) el.value = kMeterIdVal; }
-            
-            // --- VALS: 全スロット一括受信 (V7.7) ---
-            else if (cleanedCmd.startsWith("VALS=")) {
-                const parts = cleanedCmd.substring(5).split(",");
-                for (let i = 0; i < 7 && i < parts.length; i++) {
-                    if (parts[i] === "") continue;
-                    const raw = parseInt(parts[i]);
-                    if (isNaN(raw)) continue;
-                    const mIdx = i + 2; // slot0→meter-val-2, slot1→meter-val-3...
-                    const res = updateMeterValue(`meter-val-${mIdx}`, `meter-unit-${mIdx}`, raw, i);
-                    if (currentRxSlot === i) {
-                        document.getElementById("rx-live-val").textContent = res.disp;
-                    }
-                }
+            // ★ グループID確認受信
+            else if (cleanedCmd.startsWith("GRP1=")) {
+                const val = cleanedCmd.split("=")[1].replace("0x","").replace("0X","").toUpperCase();
+                grp1IdVal = val; localStorage.setItem("grp1IdVal", val);
+                const el = document.getElementById("grp1-id-input"); if(el){ el.value = val; updateGrpDec('grp1'); }
+                const st = document.getElementById("grp-status"); if(st){ st.textContent = "✅ GRP1 confirmed: 0x"+val; st.style.color="#51cf66"; }
+                log("Sync GRP1: " + val);
             }
-                        // --- METER UPDATES (Using Array Config) ---
+            else if (cleanedCmd.startsWith("GRP2=")) {
+                const val = cleanedCmd.split("=")[1].replace("0x","").replace("0X","").toUpperCase();
+                grp2IdVal = val; localStorage.setItem("grp2IdVal", val);
+                const el = document.getElementById("grp2-id-input"); if(el){ el.value = val; updateGrpDec('grp2'); }
+                const st = document.getElementById("grp-status"); if(st){ st.textContent = "✅ GRP2 confirmed: 0x"+val; st.style.color="#51cf66"; }
+                log("Sync GRP2: " + val);
+            }
+            else if (cleanedCmd.startsWith("SLOT_MODE_OK=")) {
+                log("✅ SlotMode confirmed: " + cleanedCmd.split("=")[1]);
+                const statusEl = document.getElementById("rx-config-status");
+                if(statusEl){ statusEl.textContent = "✅ "+cleanedCmd; statusEl.style.color="#51cf66"; }
+            }
+            
+            // --- METER UPDATES (Using Array Config) ---
             else if (cleanedCmd.startsWith("VAL=")) {
                 let raw = parseInt(cleanedCmd.split("=")[1]);
                 const res = updateMeterValue("meter-val-2", "meter-unit-2", raw, 0); // Slot 0
@@ -954,9 +968,6 @@
                         const onVal = parseInt(btnOnVals[i], 16); btnStates[i] = (receivedVal === onVal); updateBtnVisual(i + 1, btnStates[i]);
                     }
                 }
-            } else if (cleanedCmd.startsWith("RXID=")) {
-                const val = cleanedCmd.split("=")[1]; log("✅ RX ID confirmed by device: " + val);
-                const statusEl = document.getElementById("rx-config-status"); if (statusEl) { statusEl.textContent = "✅ Device confirmed: " + val; statusEl.style.color = "#51cf66"; }
             }
             else if (cleanedCmd.startsWith("STATUS=")) { const st = cleanedCmd.substring(7); updateCanStatus(st); }
         }
@@ -1003,8 +1014,37 @@
             } else { alert("Invalid Hex ID"); } 
         }
 
+        // ★ グループID設定 (v4.0)
+        function updateGrpDec(grp) {
+            const el = document.getElementById(`${grp}-id-input`);
+            const dec = document.getElementById(`${grp}-dec-display`);
+            if (!el || !dec) return;
+            const v = parseInt(el.value, 16);
+            dec.textContent = isNaN(v) ? "" : `(${v})`;
+        }
+        function setGroups() {
+            const g1 = document.getElementById("grp1-id-input").value.trim();
+            const g2 = document.getElementById("grp2-id-input").value.trim();
+            if (!g1.match(/^[0-9A-Fa-f]+$/) || !g2.match(/^[0-9A-Fa-f]+$/)) {
+                alert("Invalid Hex ID"); return;
+            }
+            grp1IdVal = g1.toUpperCase(); grp2IdVal = g2.toUpperCase();
+            localStorage.setItem("grp1IdVal", grp1IdVal);
+            localStorage.setItem("grp2IdVal", grp2IdVal);
+            updateGrpDec('grp1'); updateGrpDec('grp2');
+            const cmd = `SET_GROUPS=${g1},${g2}`;
+            log("TX Groups: " + cmd);
+            const st = document.getElementById("grp-status");
+            if (rxChar) {
+                rxChar.writeValue(new TextEncoder().encode(cmd))
+                    .then(() => { if(st){ st.textContent="📡 Sent! Waiting confirm..."; st.style.color="#74c0fc"; } })
+                    .catch(() => { if(st){ st.textContent="❌ Send failed"; st.style.color="#ff6b6b"; } });
+            } else {
+                if(st){ st.textContent="✅ Saved locally (Not Connected)"; st.style.color="#ffc107"; }
+            }
+        }
         function exportConfig() {
-            const config = { version: "8.1.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnAuth, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs };
+            const config = { version: "4.0.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnAuth, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs, grp1Id: grp1IdVal, grp2Id: grp2IdVal };
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2)); const downloadAnchor = document.createElement('a'); downloadAnchor.setAttribute("href", dataStr); downloadAnchor.setAttribute("download", "m5_can_config_v3_8.json"); document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove(); log("Config Exported");
         }
         function importConfig() { document.getElementById('import-file').click(); }
@@ -1031,6 +1071,8 @@
                     if (config.btnOffDelays) { btnOffDelays = config.btnOffDelays; localStorage.setItem("btnOffDelays", JSON.stringify(btnOffDelays)); }
                     
                     if (config.rxConfigs) { rxConfigs = config.rxConfigs; localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs)); }
+                    if (config.grp1Id) { grp1IdVal = config.grp1Id; localStorage.setItem("grp1IdVal", grp1IdVal); const el=document.getElementById("grp1-id-input"); if(el){el.value=grp1IdVal; updateGrpDec('grp1');} }
+                    if (config.grp2Id) { grp2IdVal = config.grp2Id; localStorage.setItem("grp2IdVal", grp2IdVal); const el=document.getElementById("grp2-id-input"); if(el){el.value=grp2IdVal; updateGrpDec('grp2');} }
 
                     log("Config Loaded"); alert("Configuration Loaded Successfully"); renderConfigList(); renderKeypadGrid(); loadRxSlotFromUI(); updateLabelsOnMeterView();
                 } catch (err) { log("Import Err: " + err); alert("Failed to load config"); }
