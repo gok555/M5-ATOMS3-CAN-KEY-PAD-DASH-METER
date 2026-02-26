@@ -918,7 +918,22 @@
                 if(statusEl){ statusEl.textContent = "✅ "+cleanedCmd; statusEl.style.color="#51cf66"; }
             }
             
-            // --- METER UPDATES (Using Array Config) ---
+            // --- VALS: 全スロット一括受信 (V7.7) ---
+            // VALS=v0,v1,v2,v3,v4,v5,v6 形式。未更新スロットは空文字
+            else if (cleanedCmd.startsWith("VALS=")) {
+                const parts = cleanedCmd.substring(5).split(",");
+                for (let i = 0; i < 7 && i < parts.length; i++) {
+                    if (parts[i] === "") continue;
+                    const raw = parseInt(parts[i]);
+                    if (isNaN(raw)) continue;
+                    const mIdx = i + 2; // slot0→meter-val-2, slot6→meter-val-8
+                    const res = updateMeterValue(`meter-val-${mIdx}`, `meter-unit-${mIdx}`, raw, i);
+                    if (currentRxSlot === i) {
+                        document.getElementById("rx-live-val").textContent = res.disp;
+                    }
+                }
+            }
+                        // --- METER UPDATES (Using Array Config) ---
             else if (cleanedCmd.startsWith("VAL=")) {
                 let raw = parseInt(cleanedCmd.split("=")[1]);
                 const res = updateMeterValue("meter-val-2", "meter-unit-2", raw, 0); // Slot 0
