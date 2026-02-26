@@ -40,10 +40,12 @@ DRAIN_MAX     = 10
 CAN_SEND_INT  = 100
 TEMP_SEND_INT = 200
 DISP_INT      = 250
+VALS_SEND_INT = 20         # ★ VALS送信間隔 20ms (50Hz) CAN受信と非同期
 
 can             = None
 ble_tx_queue    = []
-pending_vals    = {}       # {slot_idx: value} 上書き方式
+last_vals       = {}       # ★ 常に最新値を保持 (クリアしない)
+last_vals_send  = 0
 allowed_ids_set = set()
 last_can_send       = 0
 last_temp_send      = 0
@@ -224,25 +226,23 @@ def process_can_rx():
                 for i in range(4):
                     val = extract_val(data, i * 2, slot_modes[i])
                     if val is not None:
-                        pending_vals[i] = val
+                        last_vals[i] = val   # ★ 上書き保持 (クリアしない)
             elif can_id == CAN_GROUP_2_ID:
                 for i in range(3):
                     val = extract_val(data, i * 2, slot_modes[i + 4])
                     if val is not None:
-                        pending_vals[i + 4] = val
+                        last_vals[i + 4] = val
         can_error = False
     except MemoryError: pass
     except: can_error = True
 
-# ★ 全スロットを1パケット "VALS=v0,v1,v2,v3,v4,v5,v6" にまとめて送信
-# 値がないスロットは空文字("")でスキップ
+# ★ 全スロットを1パケット送信 (last_vals保持・クリアしない)
 def send_vals_packet(uart):
-    if not pending_vals: return
+    if not last_vals: return
     parts = []
     for i in range(7):
-        v = pending_vals.get(i)
+        v = last_vals.get(i)
         parts.append("" if v is None else str(v))
-    # 末尾の空を削除してパケットを短縮
     while parts and parts[-1] == "":
         parts.pop()
     if not parts: return
@@ -250,7 +250,7 @@ def send_vals_packet(uart):
     try:
         uart.send(msg.encode())
     except: pass
-    pending_vals.clear()
+    # ★ クリアしない → 次の20msでも同じ最新値を送り続ける
 
 # ------------------------------
 # 初期化
@@ -319,9 +319,11 @@ while True:
             except: pass
         last_temp_send = now
 
-    # ★ VALS一括送信 (1回のgatts_notifyで全スロット)
-    if pending_vals:
+    # ★ VALS定期送信 20ms (50Hz) CAN受信と非同期
+    # last_valsをクリアしないので毎回最新値を送り続ける
+    if time.ticks_diff(now, last_vals_send) >= VALS_SEND_INT:
         send_vals_packet(uart)
+        last_vals_send = now
     elif ble_tx_queue:
         try: uart.send(ble_tx_queue.pop(0))
         except: pass
