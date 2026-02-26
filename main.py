@@ -1,3 +1,4 @@
+
 # ==========================================
 # ATOM S3 + ATOM CAN Base
 # Ver 7.7 - BLE遅延最終解消: VALS一括送信
@@ -182,6 +183,10 @@ def process_ble_cmd():
     if not ble_rx_queue: return
     cmd = ble_rx_queue.pop(0)
     try:
+        if cmd == "REQUEST_STATE":
+            # ★ web側から再同期要求 → 即座にSTATE=を返す
+            queue_config_sync()
+            return
         if cmd.startswith("SET_GROUPS="):
             p = cmd.split('=')[1].split(',')
             CAN_GROUP_1_ID = int(p[0], 16)
@@ -296,8 +301,8 @@ while True:
 
     if _pending_config_send:
         _pending_config_send = False
-        time.sleep_ms(100)
-        queue_config_sync()
+        # ★ 接続直後300ms後にSTATE=/GRP1=等を送る (sleep_msなしでループ継続)
+        ble_tx_queue.append(b"__SYNC_DELAY__")
 
     process_can_rx()
 
@@ -319,14 +324,20 @@ while True:
             except: pass
         last_temp_send = now
 
-    # ★ VALS定期送信 20ms (50Hz) CAN受信と非同期
-    # last_valsをクリアしないので毎回最新値を送り続ける
-    if time.ticks_diff(now, last_vals_send) >= VALS_SEND_INT:
+    # ★ ble_tx_queue優先 (再接続時のSTATE=/GRP1=/GRP2=等を確実に送る)
+    # キューが空の時だけVALS定期送信 (20ms 50Hz)
+    if ble_tx_queue:
+        item = ble_tx_queue.pop(0)
+        if item == b"__SYNC_DELAY__":
+            # 再接続後: 少し待ってから設定同期を送る
+            time.sleep_ms(300)
+            queue_config_sync()
+        else:
+            try: uart.send(item)
+            except: pass
+    elif time.ticks_diff(now, last_vals_send) >= VALS_SEND_INT:
         send_vals_packet(uart)
         last_vals_send = now
-    elif ble_tx_queue:
-        try: uart.send(ble_tx_queue.pop(0))
-        except: pass
 
     if time.ticks_diff(now, last_display) > DISP_INT:
         check_can_recovery()
