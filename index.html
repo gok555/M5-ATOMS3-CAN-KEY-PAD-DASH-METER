@@ -1160,6 +1160,7 @@
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; 
         let recognition = null; 
         let isListening = false;
+        let voicePausing = false;  // ★ TTS読み上げ中はonendの自動再起動を抑制
         
         if (SpeechRecognition) {
             recognition = new SpeechRecognition(); 
@@ -1219,7 +1220,7 @@
             };
             
             recognition.onend = () => { 
-                if (isListening) recognition.start(); 
+                if (isListening && !voicePausing) recognition.start(); // ★ TTS中は再起動しない
                 updateMicIcon(); 
             };
             
@@ -1243,9 +1244,8 @@
             if (isLock) { speakVoice(label + "はロックされています。手動で操作してください。"); return; }
             
             if (btnModes[index] === 'momentary') {
-                // ★ Pullモード: 音声フィードバックなしでワンショット実行
-                // speakVoiceを呼ぶとその音声をマイクが拾って無限ループになるため
-                voicePause(500);        // 認識を一時停止してからpulse
+                // ★ Pullモード: 認識は止めずにそのまま1回だけ実行
+                // speakVoiceは呼ばない (読み上げ音声をマイクが拾ってループするため)
                 executeAction(btnNum);
                 return; 
             } 
@@ -1260,29 +1260,23 @@
             } 
         }
 
-        // ★ 音声応答時はマイクを一時停止し、読み上げ完了後に再開
-        // これにより読み上げ音声を再認識するループを防ぐ
+        // ★ TTS読み上げ中はrecognitionを停止、完了後に再開
+        // voicePausing=true にすることで onend の自動再起動を抑制してから stop する
         function voiceSpeakPaused(text) {
-            if (recognition && isListening) recognition.stop();
+            if (recognition && isListening) {
+                voicePausing = true;   // onendの自動再起動を抑制
+                recognition.stop();
+            }
             const utter = new SpeechSynthesisUtterance(text);
             utter.lang = "ja-JP"; utter.rate = 1.2;
             utter.onend = () => {
+                voicePausing = false;
                 if (isListening && recognition) {
-                    setTimeout(() => { try { recognition.start(); } catch(e){} }, 400);
+                    setTimeout(() => { try { recognition.start(); } catch(e){} }, 300);
                 }
             };
             if (synth.speaking) synth.cancel();
             synth.speak(utter);
-        }
-
-        // ★ Pullモード用: 指定ms間認識を停止してから再開
-        function voicePause(ms) {
-            if (recognition && isListening) {
-                recognition.stop();
-                setTimeout(() => {
-                    if (isListening) { try { recognition.start(); } catch(e){} }
-                }, ms);
-            }
         }
         
         function injectMicButton() { 
