@@ -64,7 +64,7 @@
             display: flex; justify-content: center; align-items: center; flex-direction: column;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); position: relative; text-align: center;
             width: 100%; height: 100%; user-select: none; -webkit-user-select: none;
-            -webkit-touch-callout: none; touch-action: none; font-size: clamp(1rem, 5vw, 2rem);
+            -webkit-touch-callout: none; touch-action: none; font-size: clamp(0.7rem, 4vw, 1.6rem); white-space: normal; overflow-wrap: break-word; word-break: break-word; line-height: 1.2;
             transition: all 0.1s ease;
         }
         .key-btn:active, .key-btn.pressed { transform: scale(0.98); }
@@ -171,14 +171,22 @@
         }
         .meter-label {
             position: absolute; top: 5px; left: 0; width: 100%; text-align: center;
-            color: #888; font-size: 0.8rem; text-transform: uppercase; font-weight: bold;
+            color: #aaa; font-size: 0.75rem; text-transform: uppercase;
+            font-weight: 600; letter-spacing: 0.05em;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            padding: 0 6px; box-sizing: border-box;
         }
         .meter-value {
             font-family: 'Courier New', Courier, monospace; font-weight: bold;
             font-size: clamp(1.5rem, 6vw, 2.5rem); color: #fff;
             text-shadow: 0 0 5px rgba(255, 255, 255, 0.2);
+            transition: font-size 0.15s ease;
         }
-        .meter-unit { position: absolute; bottom: 5px; right: 10px; color: #666; font-size: 0.7rem; }
+        .meter-unit {
+            position: absolute; bottom: 5px; right: 8px;
+            color: #999; font-size: 0.65rem; font-weight: 500;
+            letter-spacing: 0.03em; text-transform: uppercase;
+        }
         /* Specific Colors */
         .val-green { color: #00FF00; text-shadow: 0 0 10px rgba(0, 255, 0, 0.4); }
         .val-red { color: #FF0000; text-shadow: 0 0 10px rgba(255, 0, 0, 0.6); }
@@ -664,7 +672,7 @@
                   </button>
                   <input type="color" value="${color}" onchange="updateBtnColor(${i}, this.value)" style="width:30px; height:20px; border:none; background:none; cursor:pointer;">
                 </div>
-                <input type="text" class="config-name-input" value="${label}" maxlength="8" onchange="updateBtnLabel(${i}, this.value)">
+                <input type="text" class="config-name-input" value="${label}" maxlength="12" onchange="updateBtnLabel(${i}, this.value)">
                 <div style="display:flex; flex-direction:column; gap:2px;">
                   <div style="display:flex; gap:2px; align-items:center;">
                     <span style="font-size:0.7rem; color:#aaa;">ON:0x</span>
@@ -856,6 +864,19 @@
         function disconnect() { if (device && device.gatt.connected) { device.gatt.disconnect(); updateStatus(false); } }
         
         // --- METER UPDATE LOGIC ---
+        // ★ 桁数に応じてメータ数値フォントサイズを自動調整
+        function adjustMeterFontSize(el) {
+            const len = el.textContent.replace('-', '').replace('.', '').length;
+            let size;
+            if      (len <= 2) size = 'clamp(2.2rem, 9vw, 3.8rem)';
+            else if (len <= 3) size = 'clamp(2.0rem, 8vw, 3.2rem)';
+            else if (len <= 4) size = 'clamp(1.7rem, 7vw, 2.8rem)';
+            else if (len <= 5) size = 'clamp(1.4rem, 6vw, 2.3rem)';
+            else if (len <= 6) size = 'clamp(1.2rem, 5vw, 1.9rem)';
+            else               size = 'clamp(1.0rem, 4vw, 1.5rem)';
+            el.style.fontSize = size;
+        }
+
         function updateMeterValue(elId, unitId, rawVal, cfgSlotIdx) {
             // Get config for this slot
             const cfg = rxConfigs[cfgSlotIdx];
@@ -873,6 +894,7 @@
             
             if (el) {
                 el.textContent = dispVal;
+                adjustMeterFontSize(el);  // ★ 桁数に応じてフォントサイズ自動調整
                 let isAlarm = false;
                 if (cfg.warnVal !== null && !isNaN(cfg.warnVal)) {
                     if (cfg.alarmMode === 'low') { if (calcVal <= cfg.warnVal) isAlarm = true; }
