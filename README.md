@@ -1,4 +1,4 @@
-M5Atom CAN Keypad & Dash Meter (Ver 3.81)
+M5Atom CAN Keypad & Dash Meter (Ver 4)
 M5Atom S3 と ATOM CAN Base を使用した、Web Bluetooth API ベースの多機能車載コントローラー & メーターアプリです。
 
 🌟 主な機能 / Features
