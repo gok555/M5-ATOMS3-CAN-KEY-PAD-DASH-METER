@@ -1287,6 +1287,7 @@
     border-radius: 12px; padding: 10px 12px; min-width: 170px;
     display: none; flex-direction: column; gap: 6px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    position: fixed; z-index: 9998;
   }
   #logger-panel.open { display: flex; }
   #logger-status {
@@ -1354,7 +1355,37 @@
     panelOpen = !panelOpen;
     const p = document.getElementById('logger-panel');
     p.classList.toggle('open', panelOpen);
+    if (panelOpen) positionPanel();
   };
+
+  function positionPanel() {
+    const fab = document.getElementById('logger-fab');
+    const p   = document.getElementById('logger-panel');
+    const btn = document.getElementById('logger-toggle');
+    if (!fab || !p || !btn) return;
+
+    // 一旦表示してサイズ取得
+    p.style.visibility = 'hidden';
+    const pr  = p.getBoundingClientRect();
+    const br  = btn.getBoundingClientRect();
+    const sw  = window.innerWidth;
+    const sh  = window.innerHeight;
+    const PAD = 8;
+
+    // 水平方向: ボタン右端を基準に右寄せ、はみ出す場合は左に
+    let left = br.right - pr.width;
+    if (left < PAD) left = br.left;
+    if (left + pr.width > sw - PAD) left = sw - pr.width - PAD;
+
+    // 垂直方向: ボタン上に開く、はみ出す場合はボタン下に
+    let top = br.top - pr.height - 6;
+    if (top < PAD) top = br.bottom + 6;
+    if (top + pr.height > sh - PAD) top = sh - pr.height - PAD;
+
+    p.style.left = left + 'px';
+    p.style.top  = top  + 'px';
+    p.style.visibility = '';
+  }
 
   function updateStatus() {
     const el = document.getElementById('logger-status');
