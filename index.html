@@ -1265,5 +1265,212 @@
             } 
         }
     </script>
+
+<!-- ============================================================ -->
+<!-- ★ LOGGER MODULE - 既存コードに一切触れず末尾に追記するだけ  -->
+<!-- ============================================================ -->
+<style>
+  /* フローティングロガーUI */
+  #logger-fab {
+    position: fixed; bottom: 80px; right: 12px; z-index: 9999;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  }
+  #logger-panel {
+    background: rgba(20,20,20,0.95); border: 1px solid #444;
+    border-radius: 12px; padding: 10px 12px; min-width: 170px;
+    display: none; flex-direction: column; gap: 6px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  }
+  #logger-panel.open { display: flex; }
+  #logger-status {
+    font-size: 0.7rem; color: #888; text-align: center; font-family: monospace;
+  }
+  #logger-status.recording { color: #f55; animation: log-blink 1s infinite; }
+  @keyframes log-blink { 50% { opacity: 0.4; } }
+  .log-btn {
+    border: none; border-radius: 8px; padding: 8px 10px;
+    font-size: 0.85rem; font-weight: bold; cursor: pointer; width: 100%;
+    transition: opacity 0.15s;
+  }
+  .log-btn:active { opacity: 0.7; }
+  .log-btn-rec  { background: #c0392b; color: #fff; }
+  .log-btn-stop { background: #555; color: #ccc; }
+  .log-btn-save { background: #27ae60; color: #fff; }
+  .log-btn-clr  { background: #333; color: #aaa; font-size: 0.75rem; }
+  #logger-toggle {
+    background: rgba(30,30,30,0.92); border: 1px solid #555;
+    border-radius: 50%; width: 44px; height: 44px;
+    font-size: 1.3rem; cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  #logger-interval-row {
+    display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #999;
+  }
+  #logger-interval {
+    width: 48px; background: #222; border: 1px solid #555; color: #fff;
+    border-radius: 4px; padding: 3px 5px; font-size: 0.75rem; text-align: center;
+  }
+</style>
+
+<!-- フローティングボタン -->
+<div id="logger-fab">
+  <div id="logger-panel">
+    <div id="logger-status">● STANDBY  |  0 rows</div>
+    <div id="logger-interval-row">
+      <span>Interval:</span>
+      <input id="logger-interval" type="number" value="200" min="50" max="5000" step="50">
+      <span>ms</span>
+    </div>
+    <button class="log-btn log-btn-rec"  onclick="loggerStart()">⏺ REC</button>
+    <button class="log-btn log-btn-stop" onclick="loggerStop()">⏹ STOP</button>
+    <button class="log-btn log-btn-save" onclick="loggerSave()">💾 SAVE CSV</button>
+    <button class="log-btn log-btn-clr"  onclick="loggerClear()">🗑 CLEAR</button>
+  </div>
+  <button id="logger-toggle" onclick="loggerTogglePanel()" title="Logger">📋</button>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ---- 状態 ----
+  let logBuffer   = [];   // { ts, temp, s0..s6 }
+  let isRecording = false;
+  let logTimer    = null;
+  let lastSnap    = {};   // monkey-patch で常時最新値を保持
+
+  // ---- UI ----
+  let panelOpen = false;
+  window.loggerTogglePanel = function() {
+    panelOpen = !panelOpen;
+    const p = document.getElementById('logger-panel');
+    p.classList.toggle('open', panelOpen);
+  };
+
+  function updateStatus() {
+    const el = document.getElementById('logger-status');
+    if (!el) return;
+    if (isRecording) {
+      el.textContent = '⏺ REC  |  ' + logBuffer.length + ' rows';
+      el.className = 'recording';
+    } else {
+      el.textContent = '● STANDBY  |  ' + logBuffer.length + ' rows';
+      el.className = '';
+    }
+  }
+
+  // ---- 既存 updateMeterValue を monkey-patch (完全非破壊) ----
+  // DOMContentLoaded後に既存関数が定義されてから上書き
+  window.addEventListener('load', function() {
+    const _orig = window.updateMeterValue;
+    if (!_orig) return;
+    window.updateMeterValue = function(elId, unitId, rawVal, cfgSlotIdx) {
+      const res = _orig(elId, unitId, rawVal, cfgSlotIdx);
+      // slot index を elId から取得: meter-val-2 → slot0, meter-val-3 → slot1 ...
+      const m = elId.match(/meter-val-(\d+)/);
+      if (m) {
+        const mIdx = parseInt(m[1]);
+        if (mIdx >= 2 && mIdx <= 8) lastSnap['s' + (mIdx - 2)] = res ? res.disp : rawVal;
+      }
+      return res;
+    };
+  });
+
+  // TEMP値も拾う: meter-val-1 のtextContentを監視
+  const tempEl = document.getElementById('meter-val-1');
+  if (tempEl) {
+    const tempObs = new MutationObserver(function(muts) {
+      muts.forEach(function(m) { lastSnap.temp = tempEl.textContent.trim(); });
+    });
+    tempObs.observe(tempEl, { childList: true, subtree: true, characterData: true });
+  }
+
+  // ---- ロギングタイマー ----
+  function takeSnapshot() {
+    const now = new Date();
+    const ts = now.toISOString().replace('T', ' ').slice(0, 23); // "2026-02-27 12:34:56.789"
+    logBuffer.push({
+      ts,
+      temp: lastSnap.temp || '',
+      s0: lastSnap.s0 || '', s1: lastSnap.s1 || '', s2: lastSnap.s2 || '',
+      s3: lastSnap.s3 || '', s4: lastSnap.s4 || '', s5: lastSnap.s5 || '',
+      s6: lastSnap.s6 || ''
+    });
+    updateStatus();
+  }
+
+  window.loggerStart = function() {
+    if (isRecording) return;
+    isRecording = true;
+    const interval = parseInt(document.getElementById('logger-interval').value) || 200;
+    logTimer = setInterval(takeSnapshot, interval);
+    updateStatus();
+  };
+
+  window.loggerStop = function() {
+    if (!isRecording) return;
+    isRecording = false;
+    clearInterval(logTimer); logTimer = null;
+    updateStatus();
+  };
+
+  window.loggerClear = function() {
+    loggerStop();
+    logBuffer = [];
+    updateStatus();
+  };
+
+  // ---- CSV保存 ----
+  window.loggerSave = function() {
+    if (logBuffer.length === 0) { alert('No data to save.'); return; }
+
+    // ヘッダー: スロットラベルをrxConfigsから取得
+    const slotLabels = [];
+    for (let i = 0; i < 7; i++) {
+      try {
+        const cfg = window.rxConfigs && window.rxConfigs[i];
+        slotLabels.push(cfg ? (cfg.label || ('Slot' + (i+1))) : ('Slot' + (i+1)));
+      } catch(e) { slotLabels.push('Slot' + (i+1)); }
+    }
+
+    const header = ['Timestamp', 'ExhaustTemp', ...slotLabels].join(',');
+    const rows = logBuffer.map(function(r) {
+      return [r.ts, r.temp, r.s0, r.s1, r.s2, r.s3, r.s4, r.s5, r.s6].join(',');
+    });
+    const csv = header + '\n' + rows.join('\n');
+
+    const fname = 'canlog_' + new Date().toISOString().slice(0,19).replace(/[T:]/g, '-') + '.csv';
+
+    // File System Access API (Android Chrome対応) → fallback にダウンロード
+    if (window.showSaveFilePicker) {
+      window.showSaveFilePicker({
+        suggestedName: fname,
+        types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }]
+      }).then(function(fh) {
+        return fh.createWritable();
+      }).then(function(w) {
+        return w.write(csv).then(function() { return w.close(); });
+      }).then(function() {
+        alert('Saved: ' + fname);
+      }).catch(function(e) {
+        if (e.name !== 'AbortError') csvFallbackDownload(csv, fname);
+      });
+    } else {
+      csvFallbackDownload(csv, fname);
+    }
+  };
+
+  function csvFallbackDownload(csv, fname) {
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = fname; a.click();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 3000);
+  }
+
+})();
+</script>
+
 </body>
 </html>
