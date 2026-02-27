@@ -1592,6 +1592,27 @@
         fab.style.bottom = 'auto';
       }
     } catch(e) {}
+
+    // ★ 画面回転・リサイズ時に位置を再クランプ
+    function clampFabToViewport() {
+      const r   = fab.getBoundingClientRect();
+      const PAD = 4;
+      let left = parseFloat(fab.style.left) || r.left;
+      let top  = parseFloat(fab.style.top)  || r.top;
+      left = clamp(left, PAD, window.innerWidth  - r.width  - PAD);
+      top  = clamp(top,  PAD, window.innerHeight - r.height - PAD);
+      fab.style.left = left + 'px';
+      fab.style.top  = top  + 'px';
+      fab.style.right  = 'auto';
+      fab.style.bottom = 'auto';
+      localStorage.setItem('loggerFabPos',
+        JSON.stringify({ left: fab.style.left, top: fab.style.top }));
+    }
+    window.addEventListener('resize',            clampFabToViewport);
+    window.addEventListener('orientationchange', function() {
+      // orientationchange は resize より先に発火するためワンテンポ待つ
+      setTimeout(clampFabToViewport, 300);
+    });
   })();
 
 })();
