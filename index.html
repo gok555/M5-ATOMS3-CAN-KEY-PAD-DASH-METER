@@ -1182,6 +1182,33 @@
                       speakVoice("ダッシュメーターを表示");
                       return;
                 }
+
+                // ★ ロギング音声コマンド
+                if (transcript.includes("ログ開始") || transcript.includes("記録開始") || transcript.includes("ロギング開始") || transcript.includes("ロギングスタート")) {
+                    if (typeof loggerStart === 'function') {
+                        loggerStart();
+                        speakVoice("ロギングを開始しました");
+                        log("Voice: ロギング開始");
+                    }
+                    return;
+                }
+                if (transcript.includes("ログ停止") || transcript.includes("記録停止") || transcript.includes("ロギング停止") || transcript.includes("ロギングストップ") || transcript.includes("ログストップ")) {
+                    if (typeof loggerStop === 'function') {
+                        loggerStop();
+                        speakVoice("ロギングを停止しました");
+                        log("Voice: ロギング停止");
+                    }
+                    return;
+                }
+                if (transcript.includes("ログ保存") || transcript.includes("CSV保存") || transcript.includes("データ保存")) {
+                    if (typeof loggerSave === 'function') {
+                        loggerSave();
+                        speakVoice("CSVを保存します");
+                        log("Voice: CSV保存");
+                    }
+                    return;
+                }
+
                 btnLabels.forEach((label, index) => { 
                     const cleanLabel = label.replace(/\s+/g, ''); 
                     const cleanVoice = transcript.replace(/\s+/g, ''); 
