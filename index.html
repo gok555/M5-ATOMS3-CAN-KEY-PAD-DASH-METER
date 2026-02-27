@@ -450,7 +450,7 @@
                     <button class="action-btn btn-blue" onclick="exportConfig()" style="font-size:0.9rem;">⬇ Save Config</button>
                     <label for="import-file" class="action-btn btn-orange" style="font-size:0.9rem; cursor:pointer; display:flex; justify-content:center; align-items:center; gap:8px; padding:15px; border-radius:8px;">⬆ Load Config</label>
                 </div>
-                <input type="file" id="import-file" accept=".json" onchange="handleFileSelect(this)" style="display:none;">
+                <input type="file" id="import-file" accept=".json" onchange="handleFileSelect(this)" style="position:fixed;top:-9999px;left:-9999px;opacity:0;width:1px;height:1px;">
             </div>
             <div style="color: #666; font-size: 0.8rem; text-align: center; margin-top: 10px;">Atom S3 Keypad & Dash Meter Ver 4.0 (Group ID)<br>M5Atom S3 CAN</div>
         </div>
@@ -1108,10 +1108,15 @@
         }
         function importConfig() { document.getElementById('import-file').click(); }
         function handleFileSelect(input) {
-            const file = input.files[0]; if (!file) return;
+            const file = input.files[0];
+            if (!file) { log("Import: no file selected"); return; }
+            log("Import: reading " + file.name + " (" + file.size + "B)");
             const reader = new FileReader();
             reader.onload = (e) => { handleFileText(e.target.result); };
-            reader.readAsText(file); input.value = '';
+            reader.onerror = (e) => { log("FileReader error: " + e); alert("ファイル読み込みエラー"); };
+            reader.readAsText(file);
+            // input.value = '' はAndroidで次回同一ファイル選択を可能にする
+            setTimeout(() => { input.value = ''; }, 500);
         }
         function handleFileText(text) {
             try {
@@ -1137,8 +1142,13 @@
                     if (config.grp1Id) { grp1IdVal = config.grp1Id; localStorage.setItem("grp1IdVal", grp1IdVal); const el=document.getElementById("grp1-id-input"); if(el){el.value=grp1IdVal; updateGrpDec('grp1');} }
                     if (config.grp2Id) { grp2IdVal = config.grp2Id; localStorage.setItem("grp2IdVal", grp2IdVal); const el=document.getElementById("grp2-id-input"); if(el){el.value=grp2IdVal; updateGrpDec('grp2');} }
 
-                    log("Config Loaded"); alert("Configuration Loaded Successfully"); renderConfigList(); renderKeypadGrid(); loadRxSlotFromUI(); updateLabelsOnMeterView();
-                } catch (err) { log("Import Err: " + err); alert("Failed to load config: " + err); }
+                    log("Config Loaded");
+                    renderConfigList(); renderKeypadGrid(); loadRxSlotFromUI(); updateLabelsOnMeterView();
+                    alert("✅ Config Loaded!");
+                } catch (err) {
+                    log("Import Err: " + err);
+                    alert("❌ Load failed: " + err.message);
+                }
         }
         function renderKeypadGrid() {
             const container = document.getElementById("keypad"); container.innerHTML = "";
