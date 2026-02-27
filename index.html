@@ -1274,6 +1274,13 @@
   #logger-fab {
     position: fixed; bottom: 80px; right: 12px; z-index: 9999;
     display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    transition: opacity 0.1s;
+  }
+  #logger-fab.dragging { opacity: 0.85; }
+  #logger-fab.drag-ready #logger-toggle {
+    box-shadow: 0 0 0 3px #f80, 0 2px 8px rgba(0,0,0,0.5);
+    transform: scale(1.15); transition: transform 0.15s, box-shadow 0.15s;
   }
   #logger-panel {
     background: rgba(20,20,20,0.95); border: 1px solid #444;
@@ -1300,9 +1307,10 @@
   #logger-toggle {
     background: rgba(30,30,30,0.92); border: 1px solid #555;
     border-radius: 50%; width: 44px; height: 44px;
-    font-size: 1.3rem; cursor: pointer; display: flex;
+    font-size: 1.3rem; cursor: grab; display: flex;
     align-items: center; justify-content: center;
     box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    transition: transform 0.15s, box-shadow 0.15s;
   }
   #logger-interval-row {
     display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #999;
@@ -1468,6 +1476,92 @@
     a.href = url; a.download = fname; a.click();
     setTimeout(function() { URL.revokeObjectURL(url); }, 3000);
   }
+
+  // ---- ドラッグ移動 (長押し500msで有効化) ----
+  (function() {
+    const fab   = document.getElementById('logger-fab');
+    const btn   = document.getElementById('logger-toggle');
+    let longTimer = null;
+    let isDragging = false;
+    let dragReady  = false;
+    let startX, startY, fabX, fabY;
+
+    // fab の現在位置を left/top で管理
+    function initPos() {
+      const r = fab.getBoundingClientRect();
+      fab.style.left   = r.left + 'px';
+      fab.style.top    = r.top  + 'px';
+      fab.style.right  = 'auto';
+      fab.style.bottom = 'auto';
+    }
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function onPointerDown(e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      startX = e.clientX; startY = e.clientY;
+      isDragging = false; dragReady = false;
+      longTimer = setTimeout(function() {
+        dragReady = true;
+        initPos();
+        fab.classList.add('drag-ready');
+        const r = fab.getBoundingClientRect();
+        fabX = r.left; fabY = r.top;
+        btn.setPointerCapture && btn.setPointerCapture(e.pointerId);
+      }, 500);
+    }
+
+    function onPointerMove(e) {
+      if (!dragReady) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!isDragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        isDragging = true;
+        fab.classList.add('dragging');
+        fab.classList.remove('drag-ready');
+      }
+      if (!isDragging) return;
+      const r = fab.getBoundingClientRect();
+      const maxX = window.innerWidth  - r.width;
+      const maxY = window.innerHeight - r.height;
+      fab.style.left = clamp(fabX + dx, 0, maxX) + 'px';
+      fab.style.top  = clamp(fabY + dy, 0, maxY) + 'px';
+      e.preventDefault();
+    }
+
+    function onPointerUp(e) {
+      clearTimeout(longTimer);
+      fab.classList.remove('dragging', 'drag-ready');
+      if (!isDragging && !dragReady) {
+        // 通常タップ → パネル開閉
+        loggerTogglePanel();
+      }
+      // 位置を localStorage に保存
+      if (isDragging) {
+        localStorage.setItem('loggerFabPos',
+          JSON.stringify({ left: fab.style.left, top: fab.style.top }));
+      }
+      isDragging = false; dragReady = false;
+    }
+
+    btn.addEventListener('pointerdown', onPointerDown);
+    btn.addEventListener('pointermove', onPointerMove);
+    btn.addEventListener('pointerup',   onPointerUp);
+    btn.addEventListener('pointercancel', onPointerUp);
+    // onclick を無効化 (上で直接処理するため)
+    btn.onclick = null;
+
+    // 保存済み位置を復元
+    try {
+      const saved = JSON.parse(localStorage.getItem('loggerFabPos'));
+      if (saved && saved.left && saved.top) {
+        fab.style.left   = saved.left;
+        fab.style.top    = saved.top;
+        fab.style.right  = 'auto';
+        fab.style.bottom = 'auto';
+      }
+    } catch(e) {}
+  })();
 
 })();
 </script>
