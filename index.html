@@ -1184,12 +1184,12 @@
                 
                 if (transcript.includes("キーパッド") || transcript.includes("キーパット")) {
                       showMain();
-                      speakVoice("キーパッドを表示");
+                      voiceSpeakPaused("キーパッドを表示致しました");
                       return;
                 }
                 if (transcript.includes("ダッシュメーター") || transcript.includes("メーター")) {
                       showMeter();
-                      speakVoice("ダッシュメーターを表示");
+                      voiceSpeakPaused("ダッシュメーターを表示致しました");
                       return;
                 }
 
@@ -1202,7 +1202,13 @@
                     }
                     return;
                 }
-                if (transcript.includes("ログ停止") || transcript.includes("記録停止") || transcript.includes("ロギング停止") || transcript.includes("ロギングストップ") || transcript.includes("ログストップ")) {
+                if (transcript.includes("ログ停止") || transcript.includes("記録停止") ||
+                    transcript.includes("ロギング停止") || transcript.includes("ロギングストップ") ||
+                    transcript.includes("ログストップ") || transcript.includes("ログ終了") ||
+                    transcript.includes("記録終了") || transcript.includes("記録止め") ||
+                    transcript.includes("ログやめ") || transcript.includes("ログ止め") ||
+                    transcript.includes("ロギング終了") || transcript.includes("ログエンド") ||
+                    transcript.includes("ストップログ") || transcript.includes("ロギングやめ")) {
                     if (typeof loggerStop === 'function') {
                         loggerStop();
                         speakVoice("ロギングを停止しました");
