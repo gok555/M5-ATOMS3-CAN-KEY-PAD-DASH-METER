@@ -877,7 +877,21 @@
             if (connected) { ind.textContent = "🟢 BLE"; ind.classList.add("connected"); overlay.style.display = "none"; keypad.classList.add("visible"); discRow.style.display = "flex"; resetWatchdog(); document.getElementById("can-status-display").style.display = "block"; updateMainSoundIcon(); } else { ind.textContent = "🔴 Disconnected"; ind.classList.remove("connected"); ind.classList.remove("stalled"); overlay.style.display = "flex"; keypad.classList.remove("visible"); discRow.style.display = "none"; document.getElementById("can-status-display").style.display = "none"; clearTimeout(watchdogTimer); }
         }
         function resetWatchdog() { if (!isConnected) return; const ind = document.getElementById("status-display"); if (ind.textContent.includes("No Resp")) { ind.textContent = "🟢 BLE"; ind.style.color = "#00ff00"; ind.style.borderColor = "#00ff00"; ind.classList.remove("stalled"); ind.classList.add("connected"); } clearTimeout(watchdogTimer); watchdogTimer = setTimeout(() => { ind.textContent = "⚠️ No Resp"; ind.style.color = "orange"; ind.style.borderColor = "orange"; ind.classList.remove("connected"); ind.classList.add("stalled"); }, WATCHDOG_TIMEOUT); }
-        function updateCanStatus(st) { const el = document.getElementById("can-status-display"); if (!el) return; if (el.style.display === "none") el.style.display = "block"; if (st === "CAN_OK") { el.textContent = "CAN: OK"; el.className = "status-indicator can-ok"; el.style.color = "#00ff00"; el.style.borderColor = "#00ff00"; } else { el.textContent = "CAN: ERR"; el.className = "status-indicator can-err"; el.style.color = "#ff0000"; el.style.borderColor = "#ff0000"; } }
+        function updateCanStatus(st) {
+            const el = document.getElementById("can-status-display");
+            if (!el) return;
+            if (el.style.display === "none") el.style.display = "block";
+            if (st === "CAN_OK") {
+                el.textContent = "CAN: OK"; el.className = "status-indicator can-ok";
+                el.style.color = "#00ff00"; el.style.borderColor = "#00ff00";
+            } else if (st === "NO_BUS") {
+                el.textContent = "CAN: --"; el.className = "status-indicator";
+                el.style.color = "#888"; el.style.borderColor = "#888";
+            } else {
+                el.textContent = "CAN: ERR"; el.className = "status-indicator can-err";
+                el.style.color = "#ff0000"; el.style.borderColor = "#ff0000";
+            }
+        }
         async function handleStartConnect() { initAudio(); enterFullscreen(); requestWakeLock(); await connect(); }
         async function connect() {
             try {
