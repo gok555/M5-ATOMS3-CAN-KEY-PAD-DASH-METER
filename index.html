@@ -310,6 +310,22 @@
                 <div style="font-size:0.7rem; color:#888; margin-top:2px; text-align:right;">Exhaust Temp Color & Alarm</div>
             </div>
             
+            <!-- ★ BLE Device Management (Ver 8.1) -->
+            <div class="control-row" style="margin-top:10px; border:1px solid #1a4a2a; border-radius:8px; padding:10px; background:#0a190a;">
+                <div style="color:#51cf66; font-size:0.9rem; font-weight:bold; margin-bottom:8px;">🔒 BLE デバイス管理</div>
+                <div id="sec-status" style="font-size:0.75rem; color:#888; margin-bottom:6px;">接続後に取得できます</div>
+                <div id="sec-dev-list" style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;"></div>
+                <div style="display:flex; gap:6px;">
+                    <button class="action-btn" onclick="secRegisterMode()" style="flex:1; padding:10px; font-size:0.85rem; background:#1a4a1a; border:1px solid #2a7a2a; color:#7fff7f; border-radius:8px;">📲 新しいデバイスを登録</button>
+                    <button class="action-btn" onclick="secRefreshList()" style="padding:10px; font-size:0.85rem; background:#1a1a2a; border:1px solid #2a2a4a; color:#aaa; border-radius:8px;">🔄</button>
+                </div>
+                <div id="sec-reg-countdown" style="display:none; color:#FFE066; font-size:0.8rem; text-align:center; margin-top:6px; font-weight:bold;"></div>
+                <div style="font-size:0.68rem; color:#555; margin-top:6px; line-height:1.5;">
+                    💡 M5ATOMボタン3秒長押しでも登録モードON<br>
+                    ⚠️ 登録0台の間はすべての端末から接続可能
+                </div>
+            </div>
+
             <div class="control-row" style="margin-top: 10px; border-bottom:1px solid #444; padding-bottom:10px;">
                 <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">🔐 Biometric Registration</div>
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
@@ -869,7 +885,7 @@
                 gattServer = await device.gatt.connect(); device.addEventListener('gattserverdisconnected', () => { log("Disconnected Event"); updateStatus(false); });
                 const svc = await gattServer.getPrimaryService(SERVICE_UUID); rxChar = await svc.getCharacteristic(RX_UUID); txChar = await svc.getCharacteristic(TX_UUID);
                 await txChar.startNotifications(); txChar.addEventListener('characteristicvaluechanged', handleNotifications);
-                showMain(); updateStatus(true); log("BLE Ready"); setTimeout(syncAllBtnConfigs, 500);
+                showMain(); updateStatus(true); log("BLE Ready"); setTimeout(syncAllBtnConfigs, 500); setTimeout(secRefreshList, 1200);
             } catch (e) { log("Err: " + e); updateStatus(false); }
         }
         function disconnect() { if (device && device.gatt.connected) { device.gatt.disconnect(); updateStatus(false); } }
@@ -1023,6 +1039,12 @@
                 }
             }
             else if (cleanedCmd.startsWith("STATUS=")) { const st = cleanedCmd.substring(7); updateCanStatus(st); }
+            // ★ Security応答 (Ver 8.1)
+            else if (cleanedCmd.startsWith("DEVS="))      { secUpdateDevList(cleanedCmd.substring(5)); }
+            else if (cleanedCmd.startsWith("DEV_REG="))   { secHandleRegResult(cleanedCmd.substring(8)); }
+            else if (cleanedCmd.startsWith("DEV_DEL="))   { secHandleDelResult(cleanedCmd.substring(8)); }
+            else if (cleanedCmd === "REG_MODE=ON")         { secRegModeOn(); }
+            else if (cleanedCmd === "REG_MODE=OFF")        { secRegModeOff(); }
         }
         function updateBtnVisual(n, isActive) { const btn = document.getElementById('btn-' + n); if (!btn) return; if (isActive) { btn.classList.add('active'); } else { btn.classList.remove('active'); } }
         function sendState(n, state) {
@@ -1699,3 +1721,128 @@
 
 </body>
 </html>
+
+<!-- ============================================================ -->
+<!-- ★ SECURITY MODULE - BLE Device Management (Ver 8.1)        -->
+<!-- 既存コードに一切触れず末尾追記のみ                           -->
+<!-- ============================================================ -->
+<style>
+  .sec-dev-item {
+    display: flex; align-items: center; gap: 6px;
+    background: #0f2a0f; border: 1px solid #1a4a1a; border-radius: 6px;
+    padding: 6px 8px; font-size: 0.78rem; font-family: monospace;
+  }
+  .sec-dev-idx  { color: #555; font-size: 0.7rem; flex: 0 0 20px; }
+  .sec-dev-mac  { color: #51cf66; flex: 1; letter-spacing: 0.05em; }
+  .sec-del-btn  {
+    background: #2a0f0f; border: 1px solid #5a1a1a; color: #ff8080;
+    border-radius: 4px; padding: 3px 8px; font-size: 0.72rem; cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .sec-del-btn:active { background: #5a1a1a; }
+  #sec-reg-countdown { animation: sec-blink 0.7s infinite; }
+  @keyframes sec-blink { 50% { opacity: 0.3; } }
+</style>
+
+<script>
+// ★ Security Module (Ver 8.1)
+
+let _secRegTimer = null;
+let _secRegSec   = 30;
+
+// 接続していない場合はステータス欄にメッセージを出す
+function secRefreshList() {
+    if (!rxChar) {
+        const st = document.getElementById('sec-status');
+        if (st) st.textContent = '⚠️ BLE未接続 - 接続後に取得できます';
+        return;
+    }
+    rxChar.writeValue(new TextEncoder().encode('LIST_DEVS')).catch(() => {});
+}
+
+// 登録モードONをファームウェアに通知
+function secRegisterMode() {
+    if (!rxChar) { alert('BLE未接続です'); return; }
+    const st = document.getElementById('sec-status');
+    if (st) { st.textContent = '📲 登録モードON待機中...'; st.style.color = '#FFE066'; }
+    rxChar.writeValue(new TextEncoder().encode('REG_MODE_ON')).catch(() => {});
+}
+
+// デバイス削除
+function secDeleteDevice(idx) {
+    if (!rxChar) { alert('BLE未接続です'); return; }
+    const listEl = document.getElementById('sec-dev-list');
+    const mac = listEl ? listEl.querySelectorAll('.sec-dev-mac')[idx]?.textContent : '?';
+    if (!confirm(`デバイス ${idx + 1} を削除しますか？\n${mac}`)) return;
+    rxChar.writeValue(new TextEncoder().encode('DEL_DEV=' + idx)).catch(() => {});
+}
+
+// デバイスリスト表示更新
+function secUpdateDevList(devsStr) {
+    const listEl  = document.getElementById('sec-dev-list');
+    const statusEl = document.getElementById('sec-status');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    if (!devsStr) {
+        if (statusEl) { statusEl.textContent = '登録デバイス: 0台 (すべての端末から接続可能)'; statusEl.style.color = '#888'; }
+        return;
+    }
+    const macs = devsStr.split('|').filter(m => m.length > 0);
+    if (statusEl) {
+        statusEl.textContent = `登録デバイス: ${macs.length} / ${3}台`;
+        statusEl.style.color = macs.length >= 3 ? '#ff8080' : '#51cf66';
+    }
+    macs.forEach((mac, idx) => {
+        const div = document.createElement('div');
+        div.className = 'sec-dev-item';
+        div.innerHTML = `<span class="sec-dev-idx">#${idx + 1}</span>
+                         <span class="sec-dev-mac">${mac}</span>
+                         <button class="sec-del-btn" onclick="secDeleteDevice(${idx})">削除</button>`;
+        listEl.appendChild(div);
+    });
+}
+
+// 登録結果処理
+function secHandleRegResult(result) {
+    secRegModeOff();
+    if (result.startsWith('OK,')) {
+        const mac = result.substring(3);
+        alert(`✅ 登録完了!\n${mac}`);
+        secRefreshList();
+    } else if (result === 'FULL') {
+        alert('❌ 登録上限 (3台) に達しています\n不要なデバイスを削除してから登録してください');
+    } else if (result.startsWith('DUP,')) {
+        alert('⚠️ このデバイスはすでに登録済みです');
+    }
+}
+
+// 削除結果処理
+function secHandleDelResult(result) {
+    log('DEL OK: ' + result);
+    // LIST_DEVS はファームウェア側が自動送信する
+}
+
+// 登録モードON表示
+function secRegModeOn() {
+    _secRegSec = 30;
+    const cdEl = document.getElementById('sec-reg-countdown');
+    const stEl = document.getElementById('sec-status');
+    if (cdEl) { cdEl.style.display = 'block'; cdEl.textContent = `📲 接続待機中... ${_secRegSec}秒`; }
+    if (stEl) { stEl.textContent = '🟡 登録モード: 新しい端末からBLE接続してください'; stEl.style.color = '#FFE066'; }
+    clearInterval(_secRegTimer);
+    _secRegTimer = setInterval(() => {
+        _secRegSec--;
+        if (cdEl) cdEl.textContent = `📲 接続待機中... ${_secRegSec}秒`;
+        if (_secRegSec <= 0) secRegModeOff();
+    }, 1000);
+}
+
+// 登録モードOFF表示
+function secRegModeOff() {
+    clearInterval(_secRegTimer);
+    const cdEl = document.getElementById('sec-reg-countdown');
+    if (cdEl) { cdEl.style.display = 'none'; cdEl.textContent = ''; }
+    secRefreshList();
+}
+</script>
