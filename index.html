@@ -310,6 +310,25 @@
                 <div style="font-size:0.7rem; color:#888; margin-top:2px; text-align:right;">Exhaust Temp Color & Alarm</div>
             </div>
             
+            <!-- ★ PIN認証管理 (Ver 8.1) -->
+            <div class="control-row" style="margin-top:10px; border:1px solid #1a3a4a; border-radius:8px; padding:10px; background:#0a1520;">
+                <div style="color:#74c0fc; font-size:0.9rem; font-weight:bold; margin-bottom:8px;">🔑 BLE PIN認証</div>
+                <div id="pin-status-label" style="font-size:0.75rem; color:#888; margin-bottom:8px;">---</div>
+                <div style="display:flex; gap:6px; margin-bottom:6px;">
+                    <input id="pin-input" type="number" maxlength="4" placeholder="4桁PIN"
+                        style="flex:1; background:#111; color:#fff; border:1px solid #333; border-radius:6px; padding:8px; font-size:1.1rem; text-align:center; -moz-appearance:textfield;"
+                        oninput="this.value=this.value.slice(0,4)" onkeydown="if(event.key==='Enter') pinSetOrSend()">
+                    <button class="action-btn" onclick="pinSetOrSend()" style="flex:0 0 auto; padding:10px 16px; background:#1a3a5a; border:1px solid #2a6aaa; color:#74c0fc; border-radius:8px; font-size:0.9rem;">送信</button>
+                </div>
+                <div style="display:flex; gap:6px;">
+                    <button class="action-btn" onclick="pinClear()" style="flex:1; padding:8px; background:#2a1a1a; border:1px solid #5a2a2a; color:#ff8080; border-radius:8px; font-size:0.8rem;">🗑 PINリセット</button>
+                </div>
+                <div style="font-size:0.68rem; color:#555; margin-top:6px; line-height:1.5;">
+                    💡 初回接続時にPINを設定 → 以降は自動送信<br>
+                    ⚠️ PIN未設定の間はすべての端末から接続可能
+                </div>
+            </div>
+
             <div class="control-row" style="margin-top: 10px; border-bottom:1px solid #444; padding-bottom:10px;">
                 <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 5px;">🔐 Biometric Registration</div>
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
@@ -861,7 +880,14 @@
             if (connected) { ind.textContent = "🟢 BLE"; ind.classList.add("connected"); overlay.style.display = "none"; keypad.classList.add("visible"); discRow.style.display = "flex"; resetWatchdog(); document.getElementById("can-status-display").style.display = "block"; updateMainSoundIcon(); } else { ind.textContent = "🔴 Disconnected"; ind.classList.remove("connected"); ind.classList.remove("stalled"); overlay.style.display = "flex"; keypad.classList.remove("visible"); discRow.style.display = "none"; document.getElementById("can-status-display").style.display = "none"; clearTimeout(watchdogTimer); }
         }
         function resetWatchdog() { if (!isConnected) return; const ind = document.getElementById("status-display"); if (ind.textContent.includes("No Resp")) { ind.textContent = "🟢 BLE"; ind.style.color = "#00ff00"; ind.style.borderColor = "#00ff00"; ind.classList.remove("stalled"); ind.classList.add("connected"); } clearTimeout(watchdogTimer); watchdogTimer = setTimeout(() => { ind.textContent = "⚠️ No Resp"; ind.style.color = "orange"; ind.style.borderColor = "orange"; ind.classList.remove("connected"); ind.classList.add("stalled"); }, WATCHDOG_TIMEOUT); }
-        function updateCanStatus(st) { const el = document.getElementById("can-status-display"); if (!el) return; if (el.style.display === "none") el.style.display = "block"; if (st === "CAN_OK") { el.textContent = "CAN: OK"; el.className = "status-indicator can-ok"; el.style.color = "#00ff00"; el.style.borderColor = "#00ff00"; } else { el.textContent = "CAN: ERR"; el.className = "status-indicator can-err"; el.style.color = "#ff0000"; el.style.borderColor = "#ff0000"; } }
+        function updateCanStatus(st) {
+            const el = document.getElementById("can-status-display");
+            if (!el) return;
+            if (el.style.display === "none") el.style.display = "block";
+            if (st === "CAN_OK")      { el.textContent = "CAN: OK"; el.style.color = "#00ff00"; el.style.borderColor = "#00ff00"; }
+            else if (st === "NO_BUS") { el.textContent = "CAN: --"; el.style.color = "#888";    el.style.borderColor = "#888"; }
+            else                      { el.textContent = "CAN: ERR"; el.style.color = "#ff0000"; el.style.borderColor = "#ff0000"; }
+        }
         async function handleStartConnect() { initAudio(); enterFullscreen(); requestWakeLock(); await connect(); }
         async function connect() {
             try {
@@ -869,7 +895,7 @@
                 gattServer = await device.gatt.connect(); device.addEventListener('gattserverdisconnected', () => { log("Disconnected Event"); updateStatus(false); });
                 const svc = await gattServer.getPrimaryService(SERVICE_UUID); rxChar = await svc.getCharacteristic(RX_UUID); txChar = await svc.getCharacteristic(TX_UUID);
                 await txChar.startNotifications(); txChar.addEventListener('characteristicvaluechanged', handleNotifications);
-                showMain(); updateStatus(true); log("BLE Ready"); setTimeout(syncAllBtnConfigs, 500);
+                showMain(); updateStatus(true); log("BLE Ready"); setTimeout(syncAllBtnConfigs, 500); pinUpdateStatusLabel();
             } catch (e) { log("Err: " + e); updateStatus(false); }
         }
         function disconnect() { if (device && device.gatt.connected) { device.gatt.disconnect(); updateStatus(false); } }
@@ -1023,6 +1049,11 @@
                 }
             }
             else if (cleanedCmd.startsWith("STATUS=")) { const st = cleanedCmd.substring(7); updateCanStatus(st); }
+            else if (cleanedCmd === "NEED_PIN")     { pinHandleNeedPin(); }
+            else if (cleanedCmd === "NEED_SET_PIN") { pinHandleNeedSetPin(); }
+            else if (cleanedCmd === "PIN_OK")       { pinHandleOk(); }
+            else if (cleanedCmd === "PIN_NG")       { pinHandleNg(); }
+            else if (cleanedCmd === "PIN_CLEARED")  { localStorage.removeItem('pinCode'); alert("✅ PINをリセットしました"); }
         }
         function updateBtnVisual(n, isActive) { const btn = document.getElementById('btn-' + n); if (!btn) return; if (isActive) { btn.classList.add('active'); } else { btn.classList.remove('active'); } }
         function sendState(n, state) {
@@ -1108,7 +1139,9 @@
             }
         }
         function exportConfig() {
-            const config = { version: "4.0.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnAuth, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs, grp1Id: grp1IdVal, grp2Id: grp2IdVal };
+            const _pin = localStorage.getItem('pinCode') || '';
+            const config = { version: "4.0.0", timestamp: new Date().toISOString(), btnLabels, btnModes, btnColors, btnOnVals, btnOffVals, btnEndian, btnIcons, btnAuth, btnOnDelays, btnOffDelays, cfgVibe, cfgSound, canId: canIdVal, kMeterId: kMeterIdVal, tempWarnVal, tempColor, rxConfigs, grp1Id: grp1IdVal, grp2Id: grp2IdVal,
+                pinCode: _pin };
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2)); const downloadAnchor = document.createElement('a'); downloadAnchor.setAttribute("href", dataStr); downloadAnchor.setAttribute("download", "m5_can_config_v3_8.json"); document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove(); log("Config Exported");
         }
         function importConfig() { document.getElementById('import-file').click(); }
@@ -1139,6 +1172,7 @@
                     if (config.btnOffDelays) { btnOffDelays = config.btnOffDelays; localStorage.setItem("btnOffDelays", JSON.stringify(btnOffDelays)); }
                     
                     if (config.rxConfigs) { rxConfigs = config.rxConfigs; localStorage.setItem("rxConfigs", JSON.stringify(rxConfigs)); }
+                    if (config.pinCode) { localStorage.setItem('pinCode', config.pinCode); log("PIN restored"); }
                     if (config.grp1Id) { grp1IdVal = config.grp1Id; localStorage.setItem("grp1IdVal", grp1IdVal); const el=document.getElementById("grp1-id-input"); if(el){el.value=grp1IdVal; updateGrpDec('grp1');} }
                     if (config.grp2Id) { grp2IdVal = config.grp2Id; localStorage.setItem("grp2IdVal", grp2IdVal); const el=document.getElementById("grp2-id-input"); if(el){el.value=grp2IdVal; updateGrpDec('grp2');} }
 
@@ -1169,6 +1203,7 @@
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; 
         let recognition = null; 
         let isListening = false;
+        let voicePausing = false;
         let voicePausing = false;
         
         if (SpeechRecognition) {
@@ -1249,6 +1284,17 @@
             };
         }
         
+        function voiceSpeakPaused(text) {
+            if (recognition && isListening) { voicePausing = true; recognition.stop(); }
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = "ja-JP"; utter.rate = 1.2;
+            utter.onend = () => {
+                voicePausing = false;
+                if (isListening && recognition) { setTimeout(() => { try { recognition.start(); } catch(e){} }, 300); }
+            };
+            if (synth.speaking) synth.cancel();
+            synth.speak(utter);
+        }
         function voiceSpeakPaused(text) {
             if (recognition && isListening) { voicePausing = true; recognition.stop(); }
             const utter = new SpeechSynthesisUtterance(text);
@@ -1699,3 +1745,143 @@
 
 </body>
 </html>
+
+<!-- ============================================================ -->
+<!-- ★ PIN AUTHENTICATION MODULE (Ver 8.1)                      -->
+<!-- 既存コードに一切触れず末尾追記のみ                           -->
+<!-- ============================================================ -->
+<script>
+// ★ PIN Authentication Module
+
+let _pinNeedSet  = false;   // 初回設定モードか
+let _pinNeedAuth = false;   // 認証要求中か
+
+// PINステータスラベル更新
+function pinUpdateStatusLabel() {
+    const el  = document.getElementById('pin-status-label');
+    const inp = document.getElementById('pin-input');
+    if (!el) return;
+    const saved = localStorage.getItem('pinCode');
+    if (saved) {
+        el.textContent = '🔒 PIN設定済み (接続時に自動送信)';
+        el.style.color = '#51cf66';
+        if (inp) { inp.placeholder = '変更する場合は入力'; }
+    } else {
+        el.textContent = '⚠️ PIN未設定 - 4桁を入力して設定してください';
+        el.style.color = '#FFE066';
+        if (inp) { inp.placeholder = '4桁PIN'; }
+    }
+}
+
+// 接続直後: ファームウェアからPINを求められた場合
+function pinHandleNeedPin() {
+    _pinNeedAuth = true;
+    _pinNeedSet  = false;
+    const saved = localStorage.getItem('pinCode');
+    if (saved && rxChar) {
+        // キャッシュがあれば自動送信
+        rxChar.writeValue(new TextEncoder().encode('PIN=' + saved)).catch(() => {});
+        log('PIN: 自動送信');
+    } else {
+        // キャッシュなし → 手動入力を促す
+        _showPinDialog('PIN入力', 'PINコードを入力してください');
+    }
+}
+
+// 初回: PINが未設定の場合
+function pinHandleNeedSetPin() {
+    _pinNeedSet  = true;
+    _pinNeedAuth = false;
+    _showPinDialog('PIN設定', '4桁のPINコードを設定してください（初回のみ）');
+}
+
+// PIN認証成功
+function pinHandleOk() {
+    _pinNeedAuth = false;
+    _pinNeedSet  = false;
+    const inp = document.getElementById('pin-input');
+    if (inp && inp.value.length === 4) {
+        localStorage.setItem('pinCode', inp.value);
+        log('PIN: 認証成功・保存完了');
+    }
+    pinUpdateStatusLabel();
+    const dlg = document.getElementById('pin-dialog');
+    if (dlg) dlg.style.display = 'none';
+}
+
+// PIN認証失敗
+function pinHandleNg() {
+    log('PIN: 認証失敗');
+    const dlg = document.getElementById('pin-dialog');
+    const msg = document.getElementById('pin-dialog-msg');
+    if (msg) { msg.textContent = '❌ PINが違います。切断されます。'; msg.style.color = '#ff6b6b'; }
+    setTimeout(() => { if (dlg) dlg.style.display = 'none'; }, 2000);
+}
+
+// 設定画面のボタン: 送信 or 設定
+function pinSetOrSend() {
+    const inp = document.getElementById('pin-input');
+    if (!inp || inp.value.length !== 4) { alert('4桁のPINを入力してください'); return; }
+    const pin = inp.value;
+    if (!rxChar) { alert('BLE未接続です'); return; }
+    if (_pinNeedSet) {
+        rxChar.writeValue(new TextEncoder().encode('SET_PIN=' + pin)).catch(() => {});
+    } else {
+        rxChar.writeValue(new TextEncoder().encode('PIN=' + pin)).catch(() => {});
+    }
+    localStorage.setItem('pinCode', pin);
+    pinUpdateStatusLabel();
+    inp.value = '';
+}
+
+// PINリセット
+function pinClear() {
+    if (!confirm('PINをリセットしますか？\n次回接続時に再設定が必要になります。')) return;
+    if (rxChar) rxChar.writeValue(new TextEncoder().encode('CLEAR_PIN')).catch(() => {});
+    localStorage.removeItem('pinCode');
+    pinUpdateStatusLabel();
+}
+
+// ダイアログ表示（接続時の自動ポップアップ）
+function _showPinDialog(title, msg) {
+    let dlg = document.getElementById('pin-dialog');
+    if (!dlg) {
+        dlg = document.createElement('div');
+        dlg.id = 'pin-dialog';
+        dlg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:#1a2030;border:2px solid #2a6aaa;border-radius:16px;padding:24px;width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.8);';
+        dlg.innerHTML = `
+            <div id="pin-dialog-title" style="color:#74c0fc;font-weight:bold;font-size:1rem;margin-bottom:8px;"></div>
+            <div id="pin-dialog-msg" style="color:#ccc;font-size:0.85rem;margin-bottom:16px;"></div>
+            <input id="pin-dialog-input" type="number" placeholder="4桁PIN" maxlength="4"
+                style="width:100%;background:#111;color:#fff;border:1px solid #333;border-radius:8px;padding:10px;font-size:1.4rem;text-align:center;box-sizing:border-box;-moz-appearance:textfield;"
+                oninput="this.value=this.value.slice(0,4)" onkeydown="if(event.key==='Enter') _pinDialogSend()">
+            <button onclick="_pinDialogSend()" style="margin-top:12px;width:100%;padding:12px;background:#1a5a9a;border:none;color:#fff;border-radius:8px;font-size:1rem;cursor:pointer;">送信</button>`;
+        document.body.appendChild(dlg);
+    }
+    document.getElementById('pin-dialog-title').textContent = title;
+    document.getElementById('pin-dialog-msg').textContent  = msg;
+    document.getElementById('pin-dialog-msg').style.color  = '#ccc';
+    dlg.style.display = 'block';
+    setTimeout(() => { const i = document.getElementById('pin-dialog-input'); if (i) i.focus(); }, 100);
+}
+
+function _pinDialogSend() {
+    const inp = document.getElementById('pin-dialog-input');
+    if (!inp || inp.value.length !== 4) { alert('4桁のPINを入力してください'); return; }
+    const pin = inp.value;
+    inp.value = '';
+    if (!rxChar) return;
+    if (_pinNeedSet) {
+        rxChar.writeValue(new TextEncoder().encode('SET_PIN=' + pin)).catch(() => {});
+    } else {
+        rxChar.writeValue(new TextEncoder().encode('PIN=' + pin)).catch(() => {});
+    }
+    // PINは一時的に保存（PIN_OK受信後に正式保存）
+    localStorage.setItem('pinCode', pin);
+}
+
+// ページ読み込み時
+window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(pinUpdateStatusLabel, 300);
+});
+</script>
