@@ -1,11 +1,36 @@
+
 # ==========================================
 # ATOM S3 + ATOM CAN Base
-# Ver 8.0 - Fix: Slot Mode Setting
+# Ver 8.1 - PIN Authentication + BUS Status
 # ==========================================
-# 【修正点】
-# Webアプリからの「SET_SLOT_MODE」コマンド受信処理を追加。
-# これにより、リトルエンディアン/ビッグエンディアン等の
-# 設定変更が正しく反映・保存されるようになります。
+# 【Ver 8.1 追加機能】
+# ★ PIN認証: 4桁PINコードによるBLE接続制限
+#   - 初回接続時にPINを設定 → NVSに保存
+#   - 以降はWebアプリが自動送信 → 即接続
+#   - 誤ったPINは2秒後に切断
+#   - SaveデータにPIN含む → ブラウザ初期化後も復元可
+#
+# ★ CANバス接続検出: フレーム受信で判定
+#   - BUS:OK  (緑) → CANフレーム受信中
+#   - BUS:--  (灰) → 信号線未接続
+#   - CAN:ERR (赤) → コントローラーエラー
+#
+# ★ PIN表示 (ディスプレイ4行目)
+#   PIN:--- → PIN未設定
+#   PIN:LOCK → 設定済み・未認証
+#   PIN:AUTH → 認証済み・通常動作
+#
+# 【Ver 8.0 既存機能】
+# SET_SLOT_MODEコマンド受信処理
+# (LE/BE等のスロットモード設定変更)
+#
+# 【boot.py を一緒に書き込む】
+#   起動高速化のため boot.py でWiFiを無効化する:
+#   --- boot.py ---
+#   import network
+#   network.WLAN(network.STA_IF).active(False)
+#   network.WLAN(network.AP_IF).active(False)
+#   ---------------
 # ==========================================
 import M5
 from M5 import *
@@ -47,9 +72,16 @@ kmeter_found  = False
 last_temp_val = 0
 can_error     = False
 filter_ok     = False
+can_rx_count  = 0
+can_bus_active = False
 nvs           = None
 _pending_config_send = False
 ble_rx_queue  = []
+
+# ★ PIN認証 (Ver 8.1)
+pin_code         = None     # 設定済みPIN (4桁文字列) or None
+pin_verified     = set()    # PIN認証済みのconn_handle
+PIN_TIMEOUT      = 10000    # 接続後10秒以内にPIN送信しないと切断
 
 UART_UUID = bluetooth.UUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
 UART_TX   = bluetooth.UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
@@ -78,11 +110,15 @@ class BLEUART:
     def _irq(self, event, data):
         global _pending_config_send
         if event == _IRQ_CENTRAL_CONNECT:
-            self._connections.add(data[0])
+            conn_handle = data[0]
+            self._connections.add(conn_handle)
+            # ★ PIN認証: 接続をキューに積んでメインループで処理
+            ble_rx_queue.append("__CONNECT__:%d" % conn_handle)
             _pending_config_send = True
         elif event == _IRQ_CENTRAL_DISCONNECT:
-            if data[0] in self._connections:
-                self._connections.remove(data[0])
+            h = data[0]
+            self._connections.discard(h)
+            pin_verified.discard(h)   # ★ 切断時に認証状態をクリア
             self._advertise()
         elif event == _IRQ_GATTS_WRITE:
             try:
@@ -95,8 +131,47 @@ class BLEUART:
             try: self._ble.gatts_notify(conn, self._tx, data)
             except: pass
 
+# ==========================================
+# ★ PIN Authentication Functions (Ver 8.1)
+# ==========================================
+def _set_pin(new_pin):
+    global pin_code
+    pin_code = new_pin
+    if nvs:
+        try:
+            nvs.set_blob("pin_code", new_pin.encode())
+            nvs.commit()
+        except: pass
+    M5.Display.setCursor(0, 60)
+    M5.Display.setTextColor(0x07E0, 0x0000)  # 緑
+    M5.Display.print("PIN:SET ")
+    print("[PIN] Set:", new_pin)
+
+def _clear_pin():
+    global pin_code
+    pin_code = None
+    if nvs:
+        try:
+            nvs.set_blob("pin_code", b"")
+            nvs.commit()
+        except: pass
+    M5.Display.fillRect(0, 60, 128, 20, 0x0000)
+    print("[PIN] Cleared")
+
+def _load_pin():
+    global pin_code
+    if not nvs: return
+    try:
+        buf = bytearray(4)
+        nvs.get_blob("pin_code", buf)
+        s = buf.decode().strip()
+        if len(s) == 4 and s.isdigit():
+            pin_code = s
+            print("[PIN] Loaded:", pin_code)
+    except: pass
+
 def update_hw_filter():
-    global allowed_ids_set, filter_ok
+    global allowed_ids_set, filter_ok, can_error
     allowed_ids_set = {CAN_GROUP_1_ID, CAN_GROUP_2_ID}
     if not can: return
     id1 = CAN_GROUP_1_ID & 0x7FF
@@ -131,10 +206,13 @@ def update_hw_filter():
         print(f"[Filter] FAIL: {e}")
 
 def check_can_recovery():
-    global can, last_recovery_check, can_error
+    global can, last_recovery_check, can_error, can_rx_count, can_bus_active
     now = time.ticks_ms()
     if time.ticks_diff(now, last_recovery_check) < 5000: return
     last_recovery_check = now
+    if can_rx_count == 0:
+        can_bus_active = False
+    can_rx_count = 0
     try:
         if can and can.state() != CANUnit.RUNNING:
             can_error = True
@@ -174,6 +252,53 @@ def process_ble_cmd():
     if not ble_rx_queue: return
     cmd = ble_rx_queue.pop(0)
     try:
+        # ★ 接続イベント処理
+        if cmd.startswith("__CONNECT__:"):
+            conn_handle = int(cmd.split(":")[1])
+            if pin_code is None:
+                # ★ PIN未設定: 接続を即許可 + 設定を促す通知のみ
+                pin_verified.add(conn_handle)
+                ble_tx_queue.append(b"NEED_SET_PIN")
+            else:
+                # PIN設定済み: PIN要求（この間は他コマンドをガード）
+                ble_tx_queue.append(b"NEED_PIN")
+            return
+
+        # ★ PIN設定コマンド (初回)
+        if cmd.startswith("SET_PIN="):
+            new_pin = cmd.split("=")[1].strip()
+            if len(new_pin) == 4 and new_pin.isdigit():
+                _set_pin(new_pin)
+                for h in uart._connections:
+                    pin_verified.add(h)
+                ble_tx_queue.append(b"PIN_OK")
+            else:
+                ble_tx_queue.append(b"PIN_ERR=invalid")
+            return
+
+        # ★ PIN送信コマンド
+        if cmd.startswith("PIN="):
+            entered = cmd.split("=")[1].strip()
+            if pin_code and entered == pin_code:
+                for h in uart._connections:
+                    pin_verified.add(h)
+                ble_tx_queue.append(b"PIN_OK")
+            else:
+                ble_tx_queue.append(b"PIN_NG")
+                time.sleep_ms(2000)
+                try:
+                    for h in list(uart._connections):
+                        uart._ble.gap_disconnect(h)
+                except: pass
+            return
+
+        # ★ PIN未認証ガード（PIN設定済みの場合のみ）
+        # REQUEST_STATE と CLEAR_PIN は認証前でも通す
+        if pin_code is not None and cmd not in ("REQUEST_STATE", "CLEAR_PIN"):
+            auth_ok = any(h in pin_verified for h in uart._connections)
+            if not auth_ok:
+                return
+
         if cmd == "REQUEST_STATE":
             queue_config_sync()
             return
@@ -222,6 +347,13 @@ def process_ble_cmd():
             k_meter_id = int(cmd.split('=')[1], 16)
             if nvs: nvs.set_i32("k_meter_id", k_meter_id); nvs.commit()
             ble_tx_queue.append(f"KID={hex(k_meter_id)}".encode())
+        elif cmd == "CLEAR_PIN":
+            # PIN削除(リセット)
+            _clear_pin()
+            for h in list(uart._connections):
+                pin_verified.discard(h)
+            ble_tx_queue.append(b"PIN_CLEARED")
+
         elif '=' in cmd:
             p = cmd.split('=')
             if p[0].isdigit():
@@ -234,7 +366,7 @@ def process_ble_cmd():
     except: pass
 
 def process_can_rx():
-    global can_error
+    global can_error, can_rx_count, can_bus_active
     if can is None: return
     try:
         for _ in range(DRAIN_MAX):
@@ -243,6 +375,8 @@ def process_can_rx():
             if not msg: break
             can_id = msg[0] & 0x7FF
             if can_id not in allowed_ids_set: continue
+            can_rx_count += 1
+            can_bus_active = True
             data = msg[4]
             if can_id == CAN_GROUP_1_ID:
                 for i in range(4):
@@ -286,6 +420,9 @@ except: pass
 try:
     for i in range(7): slot_modes[i] = nvs.get_i32(f"slot{i}_mode")
 except: pass
+
+# ★ PIN読み込み
+_load_pin()
 
 try:
     for i in range(8):
@@ -359,16 +496,38 @@ while True:
 
     if time.ticks_diff(now, last_display) > DISP_INT:
         check_can_recovery()
-        ble_tx_queue.append(b"STATUS=ERR" if can_error else b"STATUS=CAN_OK")
+        if can_error: ble_tx_queue.append(b"STATUS=ERR")
+        elif not can_bus_active: ble_tx_queue.append(b"STATUS=NO_BUS")
+        else: ble_tx_queue.append(b"STATUS=CAN_OK")
         M5.Display.setCursor(0, 0)
         M5.Display.setTextColor(0xFFFF, 0x0000)
-        M5.Display.print("V8.0 %s" % ("ERR" if can_error else "OK "))
+        # CAN BUSステータス
+        if can_error:
+            M5.Display.setTextColor(0xF800, 0x0000)
+            M5.Display.print("V8.1 CAN:ERR")
+        elif can_bus_active:
+            M5.Display.setTextColor(0x07E0, 0x0000)
+            M5.Display.print("V8.1 BUS:OK ")
+        else:
+            M5.Display.setTextColor(0x8410, 0x0000)
+            M5.Display.print("V8.1 BUS:-- ")
         M5.Display.setCursor(0, 20)
         M5.Display.setTextColor(0x07E0 if filter_ok else 0xF800, 0x0000)
         M5.Display.print("FLT:%s  " % ("HW" if filter_ok else "SW"))
         M5.Display.setCursor(0, 40)
         M5.Display.setTextColor(0xFFFF, 0x0000)
         M5.Display.print("T:%d Q:%d  " % (last_temp_val, len(ble_tx_queue)))
+        # PINステータス
+        M5.Display.setCursor(0, 60)
+        if pin_code is None:
+            M5.Display.setTextColor(0xF800, 0x0000)
+            M5.Display.print("PIN:---  ")
+        elif pin_verified:
+            M5.Display.setTextColor(0x07E0, 0x0000)
+            M5.Display.print("PIN:AUTH ")
+        else:
+            M5.Display.setTextColor(0xFFE0, 0x0000)
+            M5.Display.print("PIN:LOCK ")
         last_display = now
 
     time.sleep_ms(1)
