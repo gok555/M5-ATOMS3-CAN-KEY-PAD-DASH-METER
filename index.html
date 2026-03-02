@@ -1204,7 +1204,6 @@
         let recognition = null; 
         let isListening = false;
         let voicePausing = false;
-        let voicePausing = false;
         
         if (SpeechRecognition) {
             recognition = new SpeechRecognition(); 
@@ -1284,17 +1283,6 @@
             };
         }
         
-        function voiceSpeakPaused(text) {
-            if (recognition && isListening) { voicePausing = true; recognition.stop(); }
-            const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = "ja-JP"; utter.rate = 1.2;
-            utter.onend = () => {
-                voicePausing = false;
-                if (isListening && recognition) { setTimeout(() => { try { recognition.start(); } catch(e){} }, 300); }
-            };
-            if (synth.speaking) synth.cancel();
-            synth.speak(utter);
-        }
         function voiceSpeakPaused(text) {
             if (recognition && isListening) { voicePausing = true; recognition.stop(); }
             const utter = new SpeechSynthesisUtterance(text);
